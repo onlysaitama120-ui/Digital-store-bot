@@ -24,5 +24,10 @@ Thumbs.db
 # Bot avatar (already set on Discord, too large for repo)
 bot-avatar.png
 
+# UPI payment QR - personal payment info, keep local!
+upi-qr.png
+qr.pptx
+*upi*.png
+
 # Temp
 *.tmp
