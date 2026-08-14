@@ -76,6 +76,11 @@ async function upiEmbed(upiId, amount, name, note) {
             .setColor('#FF5555')
             .setFooter({ text: STORE_NAME });
     }
+
+    // Use the owner's own UPI scanner image if it exists locally
+    const localQr = path.join(__dirname, 'upi-qr.png');
+    const hasLocalQr = fs.existsSync(localQr);
+
     // UPI deep link (works with GPay / PhonePe / Paytm / BHIM)
     const params = new URLSearchParams();
     params.set('pa', upiId);
@@ -85,8 +90,10 @@ async function upiEmbed(upiId, amount, name, note) {
     if (note) params.set('tn', note);
     const upiLink = 'upi://pay?' + params.toString();
 
-    // QR code image (free API - reliable for embeds)
-    const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(upiLink);
+    // QR code image: use uploaded scanner, else generate one
+    const qrUrl = hasLocalQr
+        ? 'attachment://upi-qr.png'
+        : 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(upiLink);
 
     const embed = new EmbedBuilder()
         .setTitle('💳 UPI Payment Details')
@@ -105,7 +112,12 @@ async function upiEmbed(upiId, amount, name, note) {
         name: '✅ After Payment',
         value: 'Reply with the **transaction ID (UTR/Txn No.)** here so staff can confirm your order instantly.'
     });
-    return embed;
+
+    // If we have the local scanner image, attach it as a file
+    if (hasLocalQr) {
+        return { embed, file: localQr };
+    }
+    return { embed, file: null };
 }
 
 // Replace (or create) an embed with the given title in a channel.
@@ -734,8 +746,9 @@ client.on('interactionCreate', async (interaction) => {
                     autoNote = 'Order ' + channelName.replace('order-', '#');
                 }
 
-                const embed = await upiEmbed(upiId, amount, name, autoNote);
-                await interaction.reply({ embeds: [embed] });
+                const { embed, file } = await upiEmbed(upiId, amount, name, autoNote);
+                const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
+                await interaction.reply(payload);
                 break;
             }
         }
@@ -929,8 +942,9 @@ client.on('interactionCreate', async (interaction) => {
             const amount = order?.price ? String(order.price).replace(/[^0-9.]/g, '') : '';
             const note = order ? 'Order #' + order.orderNo + ' - ' + order.product : 'Order payment';
 
-            const embed = await upiEmbed(config.upiId, amount, null, note);
-            await interaction.reply({ embeds: [embed] });
+            const { embed, file } = await upiEmbed(config.upiId, amount, null, note);
+            const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
+            await interaction.reply(payload);
             return;
         }
 
