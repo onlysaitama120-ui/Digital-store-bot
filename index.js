@@ -41,6 +41,30 @@ function saveData(file, data) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
 }
 
+// Animated neon reaction cascade - emojis pop in one by one,
+// creating a glowing "neon" celebration effect on a message.
+async function neonReact(message, emojis = ['⭐', '✨', '✅', '🎉']) {
+    try {
+        for (const e of emojis) {
+            await message.react(e);
+            await new Promise(r => setTimeout(r, 400));
+        }
+    } catch (e) {
+        // ignore - reactions are cosmetic
+    }
+}
+
+// Neon "rainbow" reaction ring for special moments
+async function neonBurst(message) {
+    try {
+        const ring = ['⭐', '✨', '🔥', '✅', '🎉', '💎'];
+        for (let i = 0; i < ring.length; i++) {
+            await message.react(ring[i]);
+            await new Promise(r => setTimeout(r, 300));
+        }
+    } catch (e) { /* ignore */ }
+}
+
 // Replace (or create) an embed with the given title in a channel.
 // - Deletes OLD bot-posted embeds with the same title (so new changes appear)
 // - NEVER deletes user messages (reps, orders, chats stay safe)
@@ -439,7 +463,10 @@ client.on('interactionCreate', async (interaction) => {
                     .setTimestamp();
 
                 const vouchChannel = interaction.guild.channels.cache.find(c => c.name === 'vouches');
-                if (vouchChannel) await vouchChannel.send({ embeds: [embed] });
+                if (vouchChannel) {
+                    const vouchMsg = await vouchChannel.send({ embeds: [embed] });
+                    await neonReact(vouchMsg, ['⭐', '✨', '✅', '🎉']).catch(() => {});
+                }
 
                 // AUTOMATICALLY post "Order Completed" in #orders when vouched
                 const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
@@ -454,7 +481,8 @@ client.on('interactionCreate', async (interaction) => {
                         .setColor('#00C853')
                         .setFooter({ text: `${STORE_NAME} · Order #${vouches[target.id].count}` })
                         .setTimestamp();
-                    await ordersChannel.send({ embeds: [completeEmbed] });
+                    const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
+                    await neonBurst(orderMsg).catch(() => {});
                 }
 
                 await interaction.reply({ content: `✅ Vouched for ${target.tag}! Your vouch was logged in #vouches and #orders.`, ephemeral: true });
@@ -912,7 +940,10 @@ client.on('interactionCreate', async (interaction) => {
                 .setTimestamp();
 
             const vouchChannel = interaction.guild.channels.cache.find(c => c.name === 'vouches');
-            if (vouchChannel) await vouchChannel.send({ embeds: [vouchEmbed] });
+            if (vouchChannel) {
+                const vouchMsg = await vouchChannel.send({ embeds: [vouchEmbed] });
+                await neonReact(vouchMsg, ['⭐', '✨', '✅', '🎉']).catch(() => {});
+            }
 
             // 2) AUTOMATICALLY post "Order Completed" in #orders
             const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
@@ -927,7 +958,8 @@ client.on('interactionCreate', async (interaction) => {
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME })
                     .setTimestamp();
-                await ordersChannel.send({ embeds: [completeEmbed] });
+                const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
+                await neonBurst(orderMsg).catch(() => {});
             }
 
             await interaction.reply({ content: `✅ Vouch submitted! Posted in #vouches and logged in #orders.`, ephemeral: true });
@@ -1104,7 +1136,8 @@ client.on('messageCreate', async (message) => {
             .setColor('#00C853')
             .setFooter({ text: `${STORE_NAME} · Confirmed Order` })
             .setTimestamp();
-        await ordersChannel.send({ embeds: [completeEmbed] });
+        const completeMsg = await ordersChannel.send({ embeds: [completeEmbed] });
+        await neonBurst(completeMsg).catch(() => {});
     }
 
     // 8) Confirm to the buyer + add a vouch reaction embed
@@ -1117,8 +1150,11 @@ client.on('messageCreate', async (message) => {
         )
         .setColor('#FFD700')
         .setFooter({ text: `${STORE_NAME} · Vouch #${vouches[sellerId].count}` });
-    await message.channel.send({ embeds: [vouchEmbed] });
-    await message.react('✅');
+    const confirmMsg = await message.channel.send({ embeds: [vouchEmbed] });
+
+    // NEON ANIMATED REACTIONS - cascade on the user's vouch + the confirmation
+    await neonReact(message, ['⭐', '✨', '✅', '🎉']).catch(() => {});
+    await neonBurst(confirmMsg).catch(() => {});
 });
 
 // ==================== WELCOME ====================
