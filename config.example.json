@@ -1,0 +1,6 @@
+{
+  "_comment": "Copy this file to config.json and fill in your values. OR use environment variables: TOKEN, GUILD_ID, OWNER_ID (recommended for hosting)",
+  "token": "",
+  "guildId": "",
+  "ownerId": ""
+}

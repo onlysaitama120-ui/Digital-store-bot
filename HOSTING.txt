@@ -1,0 +1,96 @@
+=====================================================
+   XERO'S STORE - 24/7 ALWAYS-ONLINE HOSTING GUIDE
+=====================================================
+
+Your bot needs to run 24/7 so orders never stop.
+Here are your options, from easiest to most powerful.
+
+-----------------------------------------------------
+OPTION 1 (EASIEST - RECOMMENDED): BOT-HOSTING.NET
+   Free forever · 24/7 · no sleep
+   https://bot-hosting.net/
+-----------------------------------------------------
+Free plan: 256MB RAM, 1GB storage, 1 bot, auto-restart,
+99% uptime. You must log in every 4 days to renew (free).
+
+STEPS:
+1. Create account at https://bot-hosting.net/
+2. Click "Create" -> select Node.js
+3. Upload your bot files (index.js, config.json, package.json)
+   NOTE: Do NOT upload node_modules. After upload, run this
+   in their file manager terminal:
+       npm install
+4. Add your bot token: Settings -> Environment Variables
+       TOKEN = <PASTE_YOUR_BOT_TOKEN_HERE>
+   (get it from https://discord.com/developers/applications
+    -> your app -> Bot -> Reset Token)
+   The bot reads the TOKEN env var automatically - no need
+   to commit config.json.
+5. Press "Start". Done! Bot runs 24/7.
+
+-----------------------------------------------------
+OPTION 2: WISPB YTE (512MB RAM - more comfortable)
+   Free 24/7 · login every 2 weeks to renew
+   https://wispbyte.com/
+-----------------------------------------------------
+More RAM than bot-hosting.net (512MB). Same upload
+process. Install Node.js in their panel, upload files,
+npm install, set token, start.
+
+-----------------------------------------------------
+OPTION 3: JUSTRUNMY.APP
+   Free · always-on containers · auto-restart
+   https://justrunmy.app/discord-bots
+-----------------------------------------------------
+Upload as ZIP or connect GitHub. No credit card.
+
+-----------------------------------------------------
+OPTION 4: ORACLE CLOUD FREE VPS (MOST POWERFUL)
+   100% free forever · always-on virtual server
+   https://www.oracle.com/cloud/free/
+-----------------------------------------------------
+Gives you a real Linux server (ARM 4 cores / 24GB RAM).
+Most reliable option but requires Linux knowledge:
+
+1. Sign up for Oracle Cloud Free Tier
+2. Create an "Always Free" Ubuntu 22.04 instance
+3. SSH into it and run:
+     sudo apt update && sudo apt install -y nodejs npm git
+     cd ~ && git clone <your-repo-url>
+     cd discord-marketplace && npm install
+     npm install -g pm2
+     pm2 start index.js
+     pm2 save && pm2 startup
+4. Your bot now runs forever, restarts on reboot,
+   restarts on crash. Done.
+
+-----------------------------------------------------
+OPTION 5: RUN ON YOUR OWN PC (simplest, zero cost)
+-----------------------------------------------------
+Keep your PC on and use the included script:
+   Double-click:  run-forever.bat
+This auto-restarts the bot if it ever crashes.
+It runs while your PC is awake. Not true 24/7 if
+you shut down your PC, but perfect for right now.
+
+-----------------------------------------------------
+IMPORTANT NOTES FOR ALL OPTIONS
+-----------------------------------------------------
+1. The bot saves data (orders, vouches) in the
+   data/ folder. Make sure the host keeps this folder
+   (it's created automatically on first run).
+
+2. To re-setup your server after deploying, just type
+   /setup in Discord - it works from anywhere.
+
+3. If you ever want to move hosting, just copy:
+   index.js, config.json, package.json, and data/
+
+4. Keep your token secret! Never share it in public.
+
+5. Recommended order:
+   NOW: run-forever.bat on your PC
+   SOON: bot-hosting.net (free, 24/7, 4-day login)
+   LATER: Oracle Cloud free VPS (best long-term)
+
+=====================================================

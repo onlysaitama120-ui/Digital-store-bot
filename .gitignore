@@ -1,0 +1,24 @@
+# NEVER commit your bot token or data!
+config.json
+.env
+*.env
+
+# Runtime data (orders, vouches, products)
+data/
+
+# Dependencies
+node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Bot avatar (already set on Discord, too large for repo)
+bot-avatar.png
+
+# Temp
+*.tmp

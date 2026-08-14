@@ -1,0 +1,156 @@
+=====================================================
+    XERO'S STORE - DISCORD BOT SETUP GUIDE
+=====================================================
+
+✅ BOT STATUS:
+   - Name: Xero Store
+   - Avatar: Custom logo (bot-avatar.png)
+   - Bot ID: 1537944941194641528
+
+STEP 1: Invite Bot to Your Server
+------------------------------------
+Your bot is named: Xero Store
+Bot ID: 1537944941194641528
+
+Open this link to add the bot to your server:
+https://discord.com/api/oauth2/authorize?client_id=1537944941194641528&permissions=8&scope=bot%20applications.commands
+
+- Select your server
+- Click "Authorize"
+- Done!
+
+STEP 2: Make sure Gateway Intents are enabled
+-------------------------------------------------
+Go to https://discord.com/developers/applications
+1. Select your app
+2. Go to "Bot" tab
+3. Enable ALL THREE Privileged Gateway Intents:
+   - PRESENCE INTENT
+   - SERVER MEMBERS INTENT
+   - MESSAGE CONTENT INTENT
+4. Save
+
+STEP 3: Run the Bot
+--------------------
+1. Open command prompt / PowerShell
+2. Type:  cd C:/Users/tk620/discord-marketplace
+3. Type:  node index.js
+   OR just double-click start.bat
+
+STEP 4: Setup Your Server
+---------------------------
+In your Discord server, type:
+    /setup
+
+The bot will automatically create ALL channels and roles
+matching your screenshot layout!
+
+=====================================================
+   SLASH COMMANDS
+=====================================================
+
+/setup              - Build the full server (Admin)
+/vouch @user review - Vouch for a seller after buying
+/vouches @user      - Check a user's vouches
+/product            - List a product in the shop (Seller)
+/stock              - View all products
+/orders             - Check your order status
+/confirm <no>       - Confirm an order (Staff)
+/stats              - Store statistics
+/help               - Show all commands
+
+=====================================================
+   AUTOMATIC SERVER STRUCTURE (from your screenshot)
+=====================================================
+
+🛡️ XERO'S STORE » INFO
+   # announce
+   # rules
+   # events
+   # giveaway
+
+🛒 XERO'S STORE » SHOPS
+   # restock
+   # restock-2
+   # game-acc
+   # pc-parts
+
+✅ XERO'S STORE » LEGITNESS
+   # proofs
+   # vouches
+   # orders
+
+💬 XERO'S STORE » MEMBERS
+   # general-chat    (OPEN - everyone can chat here!)
+   # welcome-back
+   # introduce
+   # level-up
+   # feedback
+   # mirrors
+   # backups
+
+🎫 XERO'S STORE » SUPPORT
+   # create-ticket  (order button + support button)
+   # ticket-logs
+
+🔊 XERO'S STORE » VOICE
+   General Voice
+   Buyers Chat
+
+ROLES: Owner, Admin, Staff, Seller, Buyer, Verified, Trusted, Member
+
+=====================================================
+   READ-ONLY SETUP
+=====================================================
+
+All channels are READ-ONLY (view only) for normal users.
+Only these channels allow messaging:
+  ✅ #general-chat  - everyone can chat freely
+  ✅ #vouches       - needed for the auto-vouch system
+  ✅ Order/Support tickets - buyer + staff can talk
+  ✅ Voice channels - everyone can talk
+
+Staff (Admin/Staff/Owner) can post in ALL channels.
+Sellers can post in shop channels (restock, game-acc, etc.)
+Products are auto-posted by the bot, so shops stay clean.
+
+=====================================================
+   HOW THE ORDER SYSTEM WORKS
+=====================================================
+
+OPTION A - Normal order (ticket):
+1. Buyer clicks "Place Order" button in #create-ticket
+2. Fills in: Product, Quantity, Offer, Notes
+3. Bot creates a private ticket: order-1, order-2, etc.
+4. Staff discusses payment with buyer in the ticket
+5. Staff clicks "Mark Complete" when done
+6. Buyer gets a "⭐ Vouch Now" button
+7. Buyer clicks it, writes a review
+8. Vouch posts in #vouches AND order log in #orders
+
+OPTION B - FAST vouch (just type in #vouches):
+1. Buyer types in #vouches:
+   +legit bought potato in 20 rupees
+   +rep bought 1x Nitro BOOST fw [450% up]
+   +trusted bought pc parts in 1500 rupees
+   vouch bought game account for $5
+2. Bot detects it AUTOMATICALLY
+3. Bot creates "✅ ORDER COMPLETED" box in #orders:
+     Order No: #12
+     Item: Potato
+     Price: INR 20
+     Buyer: @buyer
+4. Bot replies with a "⭐ Vouch Logged" confirmation
+5. Bot saves the vouch for the seller
+
+FORMATS THAT WORK:
+  +legit bought [ITEM] in [PRICE] rupees
+  +rep [SELLER-ID] legit bought [ITEM] fw [TAG]
+  bought [ITEM] for $[PRICE]
+  vouch bought [ITEM] for [PRICE]rs
+  +trusted bought [ITEM] in ₹[PRICE]
+
+The bot auto-detects: product name, price (rs/rupees/inr/$/usd),
+and seller (from mention or 17-20 digit ID).
+
+=====================================================
