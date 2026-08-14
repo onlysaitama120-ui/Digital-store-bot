@@ -16,6 +16,25 @@ config.ownerId = process.env.OWNER_ID || config.ownerId || '';
 config.upiId = process.env.UPI_ID || config.upiId || '';
 config.upiName = process.env.UPI_NAME || config.upiName || "Xero's Store";
 
+// Auto-detect UPI ID from the owner's scanner image if not configured
+try {
+    if (!config.upiId && fs.existsSync(path.join(__dirname, 'upi-qr.png'))) {
+        const { PNG } = require('pngjs');
+        const jsQR = require('jsqr');
+        const png = PNG.sync.read(fs.readFileSync(path.join(__dirname, 'upi-qr.png')));
+        const code = jsQR(new Uint8ClampedArray(png.data.buffer), png.width, png.height);
+        if (code && code.data.startsWith('upi://')) {
+            const pa = new URLSearchParams(new URL(code.data).search).get('pa');
+            const pn = new URLSearchParams(new URL(code.data).search).get('pn');
+            if (pa) config.upiId = pa;
+            if (pn) config.upiName = decodeURIComponent(pn);
+            console.log('Auto-detected UPI ID from scanner: ' + config.upiId);
+        }
+    }
+} catch (e) {
+    console.log('QR auto-detect skipped: ' + e.message);
+}
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -120,6 +139,166 @@ async function upiEmbed(upiId, amount, name, note) {
     return { embed, file: null };
 }
 
+// ==================== LEVELING SYSTEM ====================
+function xpForLevel(level) {
+    return 100 * level; // XP needed to go from level N to N+1
+}
+
+function levelFromXp(xp) {
+    let level = 0;
+    let remaining = xp;
+    while (remaining >= xpForLevel(level + 1)) {
+        remaining -= xpForLevel(level + 1);
+        level++;
+    }
+    return { level, currentXp: remaining, xpNeeded: xpForLevel(level + 1) };
+}
+
+// Grant XP to a user (rate-limited to once per 45s)
+async function grantXp(member) {
+    if (!member || member.user.bot) return;
+    const levels = loadData('levels.json');
+    const user = levels[member.id] || { xp: 0, level: 0, lastMsg: 0 };
+    const now = Date.now();
+    if (now - (user.lastMsg || 0) < 45000) return; // cooldown
+    user.lastMsg = now;
+    user.xp += Math.floor(Math.random() * 8) + 4; // 4-11 XP per message
+
+    const before = user.level;
+    const info = levelFromXp(user.xp);
+    user.level = info.level;
+    levels[member.id] = user;
+    saveData('levels.json', levels);
+
+    // Level up!
+    if (info.level > before) {
+        const levelUpChannel = member.guild.channels.cache.find(c => c.name === 'level-up');
+        const embed = new EmbedBuilder()
+            .setTitle('🎉 Level Up!')
+            .setDescription(`**${member.user.tag}** reached **Level ${info.level}**!`)
+            .setColor('#F1C40F')
+            .setFooter({ text: STORE_NAME })
+            .setTimestamp();
+        if (levelUpChannel) {
+            await levelUpChannel.send({ content: `Congrats <@${member.id}>! 🎊`, embeds: [embed] });
+        }
+
+        // Auto-assign level role
+        const levelRoleMap = { 5: 'Lv 5', 10: 'Lv 10', 25: 'Lv 25', 50: 'Lv 50', 100: 'Lv 100' };
+        for (const [lv, roleName] of Object.entries(levelRoleMap)) {
+            if (info.level >= parseInt(lv)) {
+                const role = member.guild.roles.cache.find(r => r.name === roleName);
+                if (role && !member.roles.cache.has(role.id)) {
+                    await member.roles.add(role).catch(() => {});
+                }
+            }
+        }
+    }
+}
+
+// Assign "Verified Buyer" role to a user who just vouched (or already has vouches)
+async function assignVerifiedBuyer(guild, userId) {
+    try {
+        const role = guild.roles.cache.find(r => r.name === 'Verified');
+        if (!role) return;
+        const member = await guild.members.fetch(userId).catch(() => null);
+        if (member && !member.roles.cache.has(role.id)) {
+            await member.roles.add(role);
+        }
+    } catch (e) { /* ignore */ }
+}
+
+// ==================== ANTI-SCAM PROTECTION ====================
+const SCAM_PATTERNS = [
+    /free[ ]*nitro/i,
+    /nitro[ ]*(?:gift|giveaway|boost).{0,20}(?:steam|discord[.]gift|dicsord|dlscord|discorcl)/i,
+    /discord[.]gift(?:[^a-z]|$)/i,
+    /(?:dicsord|dlscord|discorcl|discrod|disc0rd)[.]/i,
+    /steamcommunity[.]com[^"]*free/i,
+    /(?:bit[.]ly|tinyurl[.]com|t[.]me[^a-z]{1,40})(?![a-z])/i,
+    /@everyone.{0,40}(?:free|giveaway|nitro|steam|paypal)/i,
+    /(?:paypal|venmo)[^@]{0,20}@[a-z]+[.][a-z]{2,}/i,
+    /[=][^ ]{12,}={1,2}$/i
+];
+const SCAM_WORDS = ['free nitro', 'nitro gift', 'discord gift', 'steam gift', 'nitro boost free', 'gift link', 'giftcard giveaway'];
+
+async function antiScamCheck(message) {
+    const text = message.content;
+    if (!text) return false;
+
+    // Mass mention spam
+    if (message.mentions.everyone && text.length < 100) {
+        return true;
+    }
+    if (message.mentions.users.size > 10) {
+        return true;
+    }
+
+    for (const pat of SCAM_PATTERNS) {
+        if (pat.test(text)) {
+            return true;
+        }
+    }
+    for (const w of SCAM_WORDS) {
+        if (text.toLowerCase().includes(w)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ==================== GIVEAWAY ====================
+async function endGiveaway(gId, guild, channel, msg) {
+    try {
+        const giveaways = loadData('giveaways.json');
+        const ga = giveaways[gId];
+        if (!ga) return;
+        delete giveaways[gId];
+        saveData('giveaways.json', giveaways);
+
+        let entrants = ga.entrants || [];
+        // Re-collect from reactions/buttons
+        if (msg) {
+            try {
+                const fetched = await msg.fetch();
+                const reactions = fetched.reactions.cache.get('🎉');
+                if (reactions) {
+                    const users = await reactions.users.fetch();
+                    entrants = users.filter(u => !u.bot).map(u => u.id);
+                }
+            } catch (e) { /* ignore */ }
+        }
+        entrants = [...new Set(entrants)];
+
+        const winnerIds = [];
+        const pool = [...entrants];
+        for (let i = 0; i < Math.min(ga.winners, pool.length); i++) {
+            const idx = Math.floor(Math.random() * pool.length);
+            winnerIds.push(pool.splice(idx, 1)[0]);
+        }
+
+        const resultEmbed = new EmbedBuilder()
+            .setTitle('🎉 Giveaway Ended!')
+            .setDescription(`**Prize:** ${ga.prize}`)
+            .setColor('#FF69B4')
+            .setFooter({ text: STORE_NAME })
+            .setTimestamp();
+
+        if (winnerIds.length > 0) {
+            resultEmbed.addFields({
+                name: '🏆 Winners',
+                value: winnerIds.map(id => `<@${id}>`).join(', ')
+            });
+            await channel.send({ content: winnerIds.map(id => `<@${id}>`).join(' ') + ' congratulations! 🎉', embeds: [resultEmbed] });
+        } else {
+            resultEmbed.setDescription(`**Prize:** ${ga.prize}\n\nNo one entered. 😢`);
+            await channel.send({ embeds: [resultEmbed] });
+        }
+    } catch (e) {
+        console.error('Giveaway end error:', e.message);
+    }
+}
+
 // Replace (or create) an embed with the given title in a channel.
 // - Deletes OLD bot-posted embeds with the same title (so new changes appear)
 // - NEVER deletes user messages (reps, orders, chats stay safe)
@@ -168,7 +347,12 @@ async function setupServer(guild) {
         { name: 'Buyer', color: '#0099FF', permissions: [] },
         { name: 'Verified', color: '#00E5FF', permissions: [] },
         { name: 'Trusted', color: '#FFD700', permissions: [] },
-        { name: 'Member', color: '#808080', permissions: [] }
+        { name: 'Member', color: '#808080', permissions: [] },
+        { name: 'Lv 5', color: '#2ECC71', permissions: [] },
+        { name: 'Lv 10', color: '#3498DB', permissions: [] },
+        { name: 'Lv 25', color: '#9B59B6', permissions: [] },
+        { name: 'Lv 50', color: '#E91E63', permissions: [] },
+        { name: 'Lv 100', color: '#F1C40F', permissions: [] }
     ];
 
     const createdRoles = {};
@@ -449,7 +633,24 @@ const commands = [
         .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID e.g. xero@okhdfcbank').setRequired(false))
         .addStringOption(o => o.setName('amount').setDescription('Amount in INR e.g. 1100').setRequired(false))
         .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false))
-        .addStringOption(o => o.setName('note').setDescription('Payment note e.g. Order #12').setRequired(false))
+        .addStringOption(o => o.setName('note').setDescription('Payment note e.g. Order #12').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('rank')
+        .setDescription('Check your level & XP'),
+    new SlashCommandBuilder()
+        .setName('top')
+        .setDescription('See the top users by level'),
+    new SlashCommandBuilder()
+        .setName('giveaway')
+        .setDescription('Start a giveaway (Staff only)')
+        .addStringOption(o => o.setName('prize').setDescription('What is being given away').setRequired(true))
+        .addIntegerOption(o => o.setName('hours').setDescription('Duration in hours').setRequired(true))
+        .addIntegerOption(o => o.setName('winners').setDescription('Number of winners (default 1)').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('setupi')
+        .setDescription('Set your UPI ID for payments (Staff only)')
+        .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID e.g. name@okhdfcbank').setRequired(true))
+        .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false))
 ];
 
 async function registerCommands(guild) {
@@ -520,6 +721,7 @@ client.on('interactionCreate', async (interaction) => {
                     date: new Date().toISOString()
                 });
                 saveData('vouches.json', vouches);
+                await assignVerifiedBuyer(interaction.guild, interaction.user.id);
 
                 const embed = new EmbedBuilder()
                     .setTitle('⭐ New Vouch!')
@@ -751,6 +953,119 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.reply(payload);
                 break;
             }
+
+            case 'setupi': {
+                const isStaff = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
+                    interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
+                if (!isStaff) {
+                    return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                }
+                config.upiId = interaction.options.getString('upiid');
+                if (interaction.options.getString('name')) config.upiName = interaction.options.getString('name');
+                try {
+                    const fsMod = require('fs');
+                    const cfgPath = path.join(__dirname, 'config.json');
+                    let cfg = {};
+                    try { cfg = JSON.parse(fsMod.readFileSync(cfgPath, 'utf8')); } catch (e) {}
+                    cfg.upiId = config.upiId;
+                    cfg.upiName = config.upiName;
+                    fsMod.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+                    await interaction.reply({ content: '✅ UPI ID set to **' + config.upiId + '**! Payments now work.', ephemeral: true });
+                } catch (e) {
+                    await interaction.reply({ content: '✅ UPI ID set for this session: **' + config.upiId + '** (could not save to config.json)', ephemeral: true });
+                }
+                break;
+            }
+
+            case 'rank': {
+                const levels = loadData('levels.json');
+                const user = levels[interaction.user.id] || { xp: 0, level: 0 };
+                const info = levelFromXp(user.xp);
+                const progress = Math.floor((info.currentXp / info.xpNeeded) * 100);
+                const bar = '█'.repeat(Math.floor(progress / 10)) + '░'.repeat(10 - Math.floor(progress / 10));
+                const embed = new EmbedBuilder()
+                    .setTitle('📊 Rank Card')
+                    .setThumbnail(interaction.user.displayAvatarURL())
+                    .addFields(
+                        { name: '🎮 Level', value: `**${info.level}**`, inline: true },
+                        { name: '⚡ XP', value: `${user.xp} total`, inline: true },
+                        { name: '📈 Progress', value: `${bar} ${progress}%` },
+                        { name: '➡️ Next level', value: `${info.currentXp}/${info.xpNeeded} XP` }
+                    )
+                    .setColor('#F1C40F')
+                    .setFooter({ text: STORE_NAME });
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+                break;
+            }
+
+            case 'top': {
+                const levels = loadData('levels.json');
+                const sorted = Object.entries(levels)
+                    .filter(([id]) => !interaction.guild.members.cache.get(id)?.user.bot)
+                    .sort((a, b) => b[1].xp - a[1].xp)
+                    .slice(0, 10);
+                const embed = new EmbedBuilder()
+                    .setTitle('🏆 Top Members')
+                    .setColor('#F1C40F')
+                    .setFooter({ text: STORE_NAME });
+                if (sorted.length === 0) {
+                    embed.setDescription('No ranked members yet. Chat in #general-chat to earn XP!');
+                } else {
+                    const medals = ['🥇', '🥈', '🥉'];
+                    sorted.forEach(([id, data], i) => {
+                        const medal = medals[i] || `${i + 1}.`;
+                        const member = interaction.guild.members.cache.get(id);
+                        embed.addFields({ name: `${medal} ${member?.user?.username || 'Unknown'}`, value: `Level ${data.level} · ${data.xp} XP`, inline: true });
+                    });
+                }
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+                break;
+            }
+
+            case 'giveaway': {
+                const isStaff = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
+                    interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
+                if (!isStaff) {
+                    return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                }
+                const prize = interaction.options.getString('prize');
+                const hours = interaction.options.getInteger('hours');
+                const winners = interaction.options.getInteger('winners') || 1;
+                const endTime = Date.now() + hours * 3600000;
+
+                const giveawayEmbed = new EmbedBuilder()
+                    .setTitle('🎉 GIVEAWAY!')
+                    .setDescription(`**Prize:** ${prize}\n\n` +
+                        `Click the **🎉 Enter** button below to join!\n` +
+                        `**Winners:** ${winners}\n` +
+                        `**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
+                    .setColor('#FF69B4')
+                    .setFooter({ text: STORE_NAME })
+                    .setTimestamp();
+
+                const row = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId('enter_giveaway').setLabel('🎉 Enter').setStyle(ButtonStyle.Success)
+                );
+
+                const channel = interaction.guild.channels.cache.find(c => c.name === 'giveaway') || interaction.channel;
+                const msg = await channel.send({ content: '@everyone 🎁', embeds: [giveawayEmbed], components: [row] });
+
+                const giveaways = loadData('giveaways.json');
+                const gId = msg.id;
+                giveaways[gId] = {
+                    prize, winners, endTime,
+                    channelId: channel.id,
+                    hostId: interaction.user.id,
+                    entrants: []
+                };
+                saveData('giveaways.json', giveaways);
+
+                await interaction.reply({ content: `🎉 Giveaway started in ${channel}!`, ephemeral: true });
+
+                // Schedule the draw
+                setTimeout(() => endGiveaway(gId, interaction.guild, channel, msg), hours * 3600000);
+                break;
+            }
         }
     } catch (err) {
         console.error('Command error:', err);
@@ -948,6 +1263,33 @@ client.on('interactionCreate', async (interaction) => {
             return;
         }
 
+        // Giveaway enter button
+        if (interaction.customId === 'enter_giveaway') {
+            const giveaways = loadData('giveaways.json');
+            const gId = interaction.message.id;
+            const ga = giveaways[gId];
+            if (!ga) return interaction.reply({ content: '❌ This giveaway has ended.', ephemeral: true });
+            if (Date.now() > ga.endTime) return interaction.reply({ content: '❌ This giveaway has ended.', ephemeral: true });
+            if (ga.entrants.includes(interaction.user.id)) {
+                return interaction.reply({ content: '❌ You already entered!', ephemeral: true });
+            }
+            ga.entrants.push(interaction.user.id);
+            saveData('giveaways.json', giveaways);
+
+            // Update the embed with entry count
+            try {
+                const embed = interaction.message.embeds[0];
+                if (embed) {
+                    const newEmbed = EmbedBuilder.from(embed)
+                        .setDescription(embed.description + '\n**Entries:** ' + ga.entrants.length);
+                    await interaction.message.edit({ embeds: [newEmbed] });
+                }
+            } catch (e) { /* ignore */ }
+
+            await interaction.reply({ content: `🎉 You entered the giveaway! (${ga.entrants.length} entries)`, ephemeral: true });
+            return;
+        }
+
         // Vouch button in order ticket -> opens vouch modal
         if (interaction.customId.startsWith('vouch_')) {
             const parts = interaction.customId.split('_'); // vouch_{orderId}_{buyerId}
@@ -1020,6 +1362,7 @@ client.on('interactionCreate', async (interaction) => {
                 date: new Date().toISOString()
             });
             saveData('vouches.json', vouches);
+            if (interaction.guild) await assignVerifiedBuyer(interaction.guild, interaction.user.id);
 
             // Mark order complete
             order.status = '✅ Completed (Vouched)';
@@ -1218,6 +1561,7 @@ client.on('messageCreate', async (message) => {
         date: new Date().toISOString()
     });
     saveData('vouches.json', vouches);
+    if (message.guild) await assignVerifiedBuyer(message.guild, message.author.id);
 
     // 7) POST the "Order Completed" box in #orders (aesthetic design)
     const ordersChannel = message.guild.channels.cache.find(c => c.name === 'orders');
@@ -1302,7 +1646,37 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-// ==================== WELCOME ====================
+// ==================== LEVELING + ANTI-SCAM ====================
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (!message.guild) return; // guild only
+
+    // ANTI-SCAM: check every message
+    if (await antiScamCheck(message)) {
+        try {
+            await message.delete();
+            const warn = await message.channel.send(`⚠️ <@${message.author.id}> that message looked like a scam link and was deleted. If this is a mistake, message staff!`);
+            setTimeout(() => warn.delete().catch(() => {}), 8000);
+            // Log to ticket-logs
+            const logChannel = message.guild.channels.cache.find(c => c.name === 'ticket-logs');
+            if (logChannel) {
+                const logEmbed = new EmbedBuilder()
+                    .setTitle('🛡️ Scam Attempt Blocked')
+                    .setDescription(`**User:** <@${message.author.id}>\n**Channel:** <#${message.channel.id}>\n**Message:** ` + '`' + message.content.slice(0, 300) + '`')
+                    .setColor('#FF0000')
+                    .setTimestamp();
+                await logChannel.send({ embeds: [logEmbed] });
+            }
+        } catch (e) { /* ignore */ }
+        return;
+    }
+
+    // LEVELING: earn XP in chat channels (skip tickets/commands)
+    const channelName = message.channel.name || '';
+    if (/^order-|^support-|^ticket-/.test(channelName)) return;
+    if (message.content.startsWith('/')) return;
+    await grantXp(message.member);
+});
 client.on('guildMemberAdd', async (member) => {
     const welcomeChannel = member.guild.channels.cache.find(c => c.name === 'welcome-back');
     if (!welcomeChannel) return;
