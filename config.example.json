@@ -1,6 +1,8 @@
 {
-  "_comment": "Copy this file to config.json and fill in your values. OR use environment variables: TOKEN, GUILD_ID, OWNER_ID (recommended for hosting)",
+  "_comment": "Copy this file to config.json and fill in your values. OR use environment variables: TOKEN, GUILD_ID, OWNER_ID, UPI_ID, UPI_NAME (recommended for hosting)",
   "token": "",
   "guildId": "",
-  "ownerId": ""
+  "ownerId": "",
+  "upiId": "yourname@okhdfcbank",
+  "upiName": "Xero's Store"
 }

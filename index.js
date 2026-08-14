@@ -13,6 +13,8 @@ try {
 config.token = process.env.TOKEN || process.env.DISCORD_TOKEN || config.token;
 config.guildId = process.env.GUILD_ID || config.guildId || '';
 config.ownerId = process.env.OWNER_ID || config.ownerId || '';
+config.upiId = process.env.UPI_ID || config.upiId || '';
+config.upiName = process.env.UPI_NAME || config.upiName || "Xero's Store";
 
 const client = new Client({
     intents: [
@@ -63,6 +65,47 @@ async function neonBurst(message) {
             await new Promise(r => setTimeout(r, 300));
         }
     } catch (e) { /* ignore */ }
+}
+
+// Build a UPI payment embed with a scannable QR code
+async function upiEmbed(upiId, amount, name, note) {
+    if (!upiId) {
+        return new EmbedBuilder()
+            .setTitle('💳 UPI Payment')
+            .setDescription('❌ No UPI ID is set yet. Set `UPI_ID` (env var) or run `/upi` with your UPI ID.')
+            .setColor('#FF5555')
+            .setFooter({ text: STORE_NAME });
+    }
+    // UPI deep link (works with GPay / PhonePe / Paytm / BHIM)
+    const params = new URLSearchParams();
+    params.set('pa', upiId);
+    params.set('pn', name || config.upiName || STORE_NAME);
+    if (amount) params.set('am', amount);
+    params.set('cu', 'INR');
+    if (note) params.set('tn', note);
+    const upiLink = 'upi://pay?' + params.toString();
+
+    // QR code image (free API - reliable for embeds)
+    const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(upiLink);
+
+    const embed = new EmbedBuilder()
+        .setTitle('💳 UPI Payment Details')
+        .setDescription(`Scan the **QR code** below with any UPI app (GPay, PhonePe, Paytm, BHIM) or pay directly to the UPI ID.`)
+        .setImage(qrUrl)
+        .addFields(
+            { name: '🏦 UPI ID', value: '**' + upiId + '**', inline: true },
+            { name: '👤 Payee', value: name || config.upiName || STORE_NAME, inline: true }
+        )
+        .setColor('#00E5FF')
+        .setFooter({ text: STORE_NAME })
+        .setTimestamp();
+    if (amount) embed.addFields({ name: '💲 Amount', value: `₹${amount}`, inline: true });
+    if (note) embed.addFields({ name: '📝 Note', value: note, inline: true });
+    embed.addFields({
+        name: '✅ After Payment',
+        value: 'Reply with the **transaction ID (UTR/Txn No.)** here so staff can confirm your order instantly.'
+    });
+    return embed;
 }
 
 // Replace (or create) an embed with the given title in a channel.
@@ -387,14 +430,25 @@ const commands = [
         .setDescription('Show all commands'),
     new SlashCommandBuilder()
         .setName('stats')
-        .setDescription('Show store stats')
+        .setDescription('Show store stats'),
+    new SlashCommandBuilder()
+        .setName('upi')
+        .setDescription('Show UPI payment QR code (works in tickets & DMs)')
+        .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID e.g. xero@okhdfcbank').setRequired(false))
+        .addStringOption(o => o.setName('amount').setDescription('Amount in INR e.g. 1100').setRequired(false))
+        .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false))
+        .addStringOption(o => o.setName('note').setDescription('Payment note e.g. Order #12').setRequired(false))
 ];
 
 async function registerCommands(guild) {
     const rest = new REST({ version: '10' }).setToken(config.token);
     try {
         console.log('Registering slash commands...');
-        await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands });
+        // Global registration lets commands (like /upi) work in DMs too
+        await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+        if (guild) {
+            await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands });
+        }
         console.log('Slash commands registered!');
     } catch (e) {
         console.error('Failed to register commands:', e.message);
@@ -419,6 +473,11 @@ client.on('ready', async () => {
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;
     const { commandName } = interaction;
+
+    // Only /upi works in DMs; everything else needs a server
+    if (!interaction.inGuild() && commandName !== 'upi') {
+        return interaction.reply({ content: '❌ This command only works inside the server. Try `/upi` for payments!', ephemeral: true });
+    }
 
     try {
         switch (commandName) {
@@ -660,6 +719,25 @@ client.on('interactionCreate', async (interaction) => {
                 await interaction.reply({ embeds: [embed], ephemeral: true });
                 break;
             }
+
+            case 'upi': {
+                // Works in order tickets AND DMs - shows scannable UPI QR
+                const upiId = interaction.options.getString('upiid') || config.upiId;
+                const amount = interaction.options.getString('amount');
+                const name = interaction.options.getString('name') || config.upiName;
+                const note = interaction.options.getString('note');
+
+                // Auto-fill note from order ticket if running there
+                let autoNote = note;
+                const channelName = interaction.channel?.name || '';
+                if (!autoNote && /^order-/.test(channelName)) {
+                    autoNote = 'Order ' + channelName.replace('order-', '#');
+                }
+
+                const embed = await upiEmbed(upiId, amount, name, autoNote);
+                await interaction.reply({ embeds: [embed] });
+                break;
+            }
         }
     } catch (err) {
         console.error('Command error:', err);
@@ -795,6 +873,7 @@ client.on('interactionCreate', async (interaction) => {
 
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Mark Complete').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`upi_${orderId}`).setLabel('💳 Pay via UPI').setStyle(ButtonStyle.Primary).setEmoji('💳'),
                 new ButtonBuilder().setCustomId(`vouch_${orderId}_${interaction.user.id}`).setLabel('⭐ Vouch').setStyle(ButtonStyle.Secondary).setEmoji('⭐'),
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
             );
@@ -839,6 +918,20 @@ client.on('interactionCreate', async (interaction) => {
                 .setColor('#FFD700')
                 .setFooter({ text: STORE_NAME });
             await interaction.channel.send({ embeds: [vouchPrompt], components: [vouchRow] });
+        }
+
+        // UPI payment button in order ticket -> shows QR in the ticket
+        if (interaction.customId.startsWith('upi_')) {
+            const orderId = interaction.customId.replace('upi_', '');
+            const orders = loadData('orders.json');
+            const order = orders[orderId];
+
+            const amount = order?.price ? String(order.price).replace(/[^0-9.]/g, '') : '';
+            const note = order ? 'Order #' + order.orderNo + ' - ' + order.product : 'Order payment';
+
+            const embed = await upiEmbed(config.upiId, amount, null, note);
+            await interaction.reply({ embeds: [embed] });
+            return;
         }
 
         // Vouch button in order ticket -> opens vouch modal
@@ -1009,6 +1102,7 @@ client.on('interactionCreate', async (interaction) => {
 
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Mark Complete').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`upi_${orderId}`).setLabel('💳 Pay via UPI').setStyle(ButtonStyle.Primary).setEmoji('💳'),
                 new ButtonBuilder().setCustomId(`vouch_${orderId}_${interaction.user.id}`).setLabel('⭐ Vouch').setStyle(ButtonStyle.Secondary).setEmoji('⭐'),
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
             );
