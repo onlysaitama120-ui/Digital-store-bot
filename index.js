@@ -1265,6 +1265,43 @@ client.on('messageCreate', async (message) => {
     await neonBurst(confirmMsg).catch(() => {});
 });
 
+// ==================== DM COMMANDS (FALLBACK) ====================
+// Lets customers get the UPI scanner in DMs instantly,
+// even if slash commands haven't synced yet.
+client.on('messageCreate', async (message) => {
+    if (message.author.bot) return;
+    if (message.guild) return; // only handle DMs here
+
+    const text = message.content.trim().toLowerCase();
+
+    // Respond to: upi, /upi, pay, payment, scanner
+    if (/^(upi|[/]upi|pay|payment|scanner|qr)[ !.]?.*$/i.test(text)) {
+        const { embed, file } = await upiEmbed(config.upiId, null, null, null);
+        const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
+        await message.channel.send(payload);
+        return;
+    }
+
+    // If DM was a vouch-style message from a buyer, log it like in #vouches
+    const vouchKeywords = /(?:legit|rep|bought|vouch|purchased|trusted|positive)/i;
+    if (vouchKeywords.test(text)) {
+        // Load vouches for the store owner as seller
+        const sellerId = config.ownerId;
+        const vouches = loadData('vouches.json');
+        if (!vouches[sellerId]) vouches[sellerId] = { count: 0, reviews: [] };
+        vouches[sellerId].count++;
+        vouches[sellerId].reviews.push({
+            from: message.author.id,
+            fromTag: message.author.tag,
+            product: 'DM vouch',
+            review: message.content,
+            date: new Date().toISOString()
+        });
+        saveData('vouches.json', vouches);
+        await message.channel.send('⭐ Vouch recorded! Thanks for trusting ' + STORE_NAME + '!');
+    }
+});
+
 // ==================== WELCOME ====================
 client.on('guildMemberAdd', async (member) => {
     const welcomeChannel = member.guild.channels.cache.find(c => c.name === 'welcome-back');
