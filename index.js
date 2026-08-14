@@ -635,12 +635,6 @@ const commands = [
         .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false))
         .addStringOption(o => o.setName('note').setDescription('Payment note e.g. Order #12').setRequired(false)),
     new SlashCommandBuilder()
-        .setName('rank')
-        .setDescription('Check your level & XP'),
-    new SlashCommandBuilder()
-        .setName('top')
-        .setDescription('See the top users by level'),
-    new SlashCommandBuilder()
         .setName('giveaway')
         .setDescription('Start a giveaway (Staff only)')
         .addStringOption(o => o.setName('prize').setDescription('What is being given away').setRequired(true))
@@ -974,51 +968,6 @@ client.on('interactionCreate', async (interaction) => {
                 } catch (e) {
                     await interaction.reply({ content: '✅ UPI ID set for this session: **' + config.upiId + '** (could not save to config.json)', ephemeral: true });
                 }
-                break;
-            }
-
-            case 'rank': {
-                const levels = loadData('levels.json');
-                const user = levels[interaction.user.id] || { xp: 0, level: 0 };
-                const info = levelFromXp(user.xp);
-                const progress = Math.floor((info.currentXp / info.xpNeeded) * 100);
-                const bar = '█'.repeat(Math.floor(progress / 10)) + '░'.repeat(10 - Math.floor(progress / 10));
-                const embed = new EmbedBuilder()
-                    .setTitle('📊 Rank Card')
-                    .setThumbnail(interaction.user.displayAvatarURL())
-                    .addFields(
-                        { name: '🎮 Level', value: `**${info.level}**`, inline: true },
-                        { name: '⚡ XP', value: `${user.xp} total`, inline: true },
-                        { name: '📈 Progress', value: `${bar} ${progress}%` },
-                        { name: '➡️ Next level', value: `${info.currentXp}/${info.xpNeeded} XP` }
-                    )
-                    .setColor('#F1C40F')
-                    .setFooter({ text: STORE_NAME });
-                await interaction.reply({ embeds: [embed], ephemeral: true });
-                break;
-            }
-
-            case 'top': {
-                const levels = loadData('levels.json');
-                const sorted = Object.entries(levels)
-                    .filter(([id]) => !interaction.guild.members.cache.get(id)?.user.bot)
-                    .sort((a, b) => b[1].xp - a[1].xp)
-                    .slice(0, 10);
-                const embed = new EmbedBuilder()
-                    .setTitle('🏆 Top Members')
-                    .setColor('#F1C40F')
-                    .setFooter({ text: STORE_NAME });
-                if (sorted.length === 0) {
-                    embed.setDescription('No ranked members yet. Chat in #general-chat to earn XP!');
-                } else {
-                    const medals = ['🥇', '🥈', '🥉'];
-                    sorted.forEach(([id, data], i) => {
-                        const medal = medals[i] || `${i + 1}.`;
-                        const member = interaction.guild.members.cache.get(id);
-                        embed.addFields({ name: `${medal} ${member?.user?.username || 'Unknown'}`, value: `Level ${data.level} · ${data.xp} XP`, inline: true });
-                    });
-                }
-                await interaction.reply({ embeds: [embed], ephemeral: true });
                 break;
             }
 
