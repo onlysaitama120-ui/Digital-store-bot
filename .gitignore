@@ -17,6 +17,10 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
+# Office temp/lock files (e.g. ~$file.pptx)
+~$*
+*.~lock*
+
 # Bot avatar (already set on Discord, too large for repo)
 bot-avatar.png
 
