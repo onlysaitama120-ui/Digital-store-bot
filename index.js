@@ -62,6 +62,11 @@ function saveData(file, data) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
 }
 
+// Format raw pasted text for Discord embeds
+function formatProduct(raw) {
+    return raw.trim();
+}
+
 // Build a UPI payment embed with a scannable QR code
 async function upiEmbed(upiId, amount, name, note) {
     if (!upiId) {
@@ -803,22 +808,22 @@ client.on('interactionCreate', async (interaction) => {
                 if (!interaction.member.roles.cache.find(r => ['Seller', 'Admin', 'Owner', 'Staff'].includes(r.name))) {
                     return interaction.reply({ content: '❌ You need the Seller role to add products!', ephemeral: true });
                 }
-                const desc = interaction.options.getString('description');
+                const raw = interaction.options.getString('description');
+                const formatted = formatProduct(raw);
                 const channelName = interaction.options.getString('channel') || 'restock';
 
                 const products = loadData('products.json');
                 const id = Date.now().toString();
                 products[id] = {
-                    description: desc,
+                    description: formatted,
                     seller: interaction.user.id,
                     channel: channelName,
                     createdAt: new Date().toISOString()
                 };
                 saveData('products.json', products);
 
-                // Post exactly as you paste it - no extra formatting
                 const embed = new EmbedBuilder()
-                    .setDescription(desc)
+                    .setDescription(formatted)
                     .setColor('#00C853')
                     .setFooter({ text: `${STORE_NAME} · ${channelName}` })
                     .setTimestamp();
