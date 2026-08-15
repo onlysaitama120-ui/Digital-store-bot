@@ -62,30 +62,6 @@ function saveData(file, data) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
 }
 
-// Animated neon reaction cascade - emojis pop in one by one,
-// creating a glowing "neon" celebration effect on a message.
-async function neonReact(message, emojis = ['⭐', '✨', '✅', '🎉']) {
-    try {
-        for (const e of emojis) {
-            await message.react(e);
-            await new Promise(r => setTimeout(r, 400));
-        }
-    } catch (e) {
-        // ignore - reactions are cosmetic
-    }
-}
-
-// Neon "rainbow" reaction ring for special moments
-async function neonBurst(message) {
-    try {
-        const ring = ['⭐', '✨', '🔥', '✅', '🎉', '💎'];
-        for (let i = 0; i < ring.length; i++) {
-            await message.react(ring[i]);
-            await new Promise(r => setTimeout(r, 300));
-        }
-    } catch (e) { /* ignore */ }
-}
-
 // Build a UPI payment embed with a scannable QR code
 async function upiEmbed(upiId, amount, name, note) {
     if (!upiId) {
@@ -718,7 +694,7 @@ client.on('interactionCreate', async (interaction) => {
                 await assignVerifiedBuyer(interaction.guild, interaction.user.id);
 
                 const embed = new EmbedBuilder()
-                    .setTitle('⭐ New Vouch!')
+                    .setTitle('✨⭐🎉 New Vouch!')
                     .setDescription(`**${interaction.user.tag}** vouched for **${target.tag}**`)
                     .addFields(
                         { name: '🛒 Product', value: product },
@@ -731,15 +707,14 @@ client.on('interactionCreate', async (interaction) => {
 
                 const vouchChannel = interaction.guild.channels.cache.find(c => c.name === 'vouches');
                 if (vouchChannel) {
-                    const vouchMsg = await vouchChannel.send({ embeds: [embed] });
-                    await neonReact(vouchMsg, ['⭐', '✨', '✅', '🎉']).catch(() => {});
+                    await vouchChannel.send({ embeds: [embed] });
                 }
 
                 // AUTOMATICALLY post "Order Completed" in #orders when vouched
                 const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
                 if (ordersChannel) {
                     const completeEmbed = new EmbedBuilder()
-                        .setTitle('✅ Order Completed')
+                        .setTitle('✨⭐✅ Order Completed')
                         .setDescription(`**Buyer:** ${interaction.user.tag}\n**Seller:** ${target.tag}\n**Product:** ${product}`)
                         .addFields(
                             { name: '⭐ Vouch', value: review },
@@ -748,8 +723,7 @@ client.on('interactionCreate', async (interaction) => {
                         .setColor('#00C853')
                         .setFooter({ text: `${STORE_NAME} · Order #${vouches[target.id].count}` })
                         .setTimestamp();
-                    const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-                    await neonBurst(orderMsg).catch(() => {});
+                    await ordersChannel.send({ embeds: [completeEmbed] });
                 }
 
                 await interaction.reply({ content: `✅ Vouched for ${target.tag}! Your vouch was logged in #vouches and #orders.`, ephemeral: true });
@@ -1325,7 +1299,7 @@ client.on('interactionCreate', async (interaction) => {
 
             // 1) Post vouch in #vouches
             const vouchEmbed = new EmbedBuilder()
-                .setTitle('⭐ New Vouch!')
+                .setTitle('✨⭐🎉 New Vouch!')
                 .setDescription(`**${interaction.user.tag}** vouched for **${sellerTag}**`)
                 .addFields(
                     { name: '🛒 Product', value: order.product, inline: true },
@@ -1340,15 +1314,14 @@ client.on('interactionCreate', async (interaction) => {
 
             const vouchChannel = interaction.guild.channels.cache.find(c => c.name === 'vouches');
             if (vouchChannel) {
-                const vouchMsg = await vouchChannel.send({ embeds: [vouchEmbed] });
-                await neonReact(vouchMsg, ['⭐', '✨', '✅', '🎉']).catch(() => {});
+                await vouchChannel.send({ embeds: [vouchEmbed] });
             }
 
             // 2) AUTOMATICALLY post "Order Completed" in #orders
             const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
             if (ordersChannel) {
                 const completeEmbed = new EmbedBuilder()
-                    .setTitle('✅ Order Completed')
+                    .setTitle('✨⭐✅ Order Completed')
                     .setDescription(`**Order No:** ${order.orderNo}\n**Product:** ${order.product}\n**Quantity:** ${order.quantity}\n**Buyer:** <@${interaction.user.id}>`)
                     .addFields(
                         { name: '⭐ Vouch', value: `${stars} · ${review}` },
@@ -1357,8 +1330,7 @@ client.on('interactionCreate', async (interaction) => {
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME })
                     .setTimestamp();
-                const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-                await neonBurst(orderMsg).catch(() => {});
+                await ordersChannel.send({ embeds: [completeEmbed] });
             }
 
             await interaction.reply({ content: `✅ Vouch submitted! Posted in #vouches and logged in #orders.`, ephemeral: true });
@@ -1519,7 +1491,7 @@ client.on('messageCreate', async (message) => {
         const divider = '━━━━━━━━━━━━━━━━━━━━';
         const vouchText = text.length > 150 ? text.slice(0, 147) + '...' : text;
         const completeEmbed = new EmbedBuilder()
-            .setTitle('✅ ORDER COMPLETED')
+            .setTitle('✨⭐✅ ORDER COMPLETED')
             .setDescription(
                 divider + '\n' +
                 `🧾 **Order No:**  #${orderNo}\n` +
@@ -1537,13 +1509,12 @@ client.on('messageCreate', async (message) => {
             .setColor('#00C853')
             .setFooter({ text: `${STORE_NAME} · Confirmed Order` })
             .setTimestamp();
-        const completeMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-        await neonBurst(completeMsg).catch(() => {});
+        await ordersChannel.send({ embeds: [completeEmbed] });
     }
 
     // 8) Confirm to the buyer + add a vouch reaction embed
     const vouchEmbed = new EmbedBuilder()
-        .setTitle('⭐ Vouch Logged')
+        .setTitle('✨⭐🎉 Vouch Logged')
         .setDescription(`Vouch submitted for **${product}** - **${price || 'N/A'}**`)
         .addFields(
             { name: '🧾 Order No', value: `#${orderNo}`, inline: true },
@@ -1551,11 +1522,7 @@ client.on('messageCreate', async (message) => {
         )
         .setColor('#FFD700')
         .setFooter({ text: `${STORE_NAME} · Vouch #${vouches[sellerId].count}` });
-    const confirmMsg = await message.channel.send({ embeds: [vouchEmbed] });
-
-    // NEON ANIMATED REACTIONS - cascade on the user's vouch + the confirmation
-    await neonReact(message, ['⭐', '✨', '✅', '🎉']).catch(() => {});
-    await neonBurst(confirmMsg).catch(() => {});
+    await message.channel.send({ embeds: [vouchEmbed] });
 });
 
 // ==================== DM COMMANDS (FALLBACK) ====================
