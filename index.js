@@ -820,38 +820,22 @@ client.on('interactionCreate', async (interaction) => {
                 if (!interaction.member.roles.cache.find(r => ['Seller', 'Admin', 'Owner', 'Staff'].includes(r.name))) {
                     return interaction.reply({ content: '❌ You need the Seller role to add products!', ephemeral: true });
                 }
-                const raw = interaction.options.getString('description');
-                const formatted = formatProduct(raw);
                 const channelName = interaction.options.getString('channel') || 'restock';
 
-                const products = loadData('products.json');
-                const id = Date.now().toString();
-                products[id] = {
-                    description: formatted,
-                    seller: interaction.user.id,
-                    channel: channelName,
-                    createdAt: new Date().toISOString()
-                };
-                saveData('products.json', products);
+                const modal = new ModalBuilder()
+                    .setCustomId('product_modal_' + channelName)
+                    .setTitle('Post Product');
 
-                const embed = new EmbedBuilder()
-                    .setDescription(formatted)
-                    .setColor('#00C853')
-                    .setFooter({ text: `${STORE_NAME} · ${channelName}` })
-                    .setTimestamp();
+                const descInput = new TextInputBuilder()
+                    .setCustomId('product_desc')
+                    .setLabel('Paste your product listing')
+                    .setStyle(TextInputStyle.Paragraph)
+                    .setPlaceholder('Paste your full formatted product text here...')
+                    .setRequired(true)
+                    .setMaxLength(4000);
 
-                const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`buy_${id}`).setLabel('Order Now').setStyle(ButtonStyle.Success).setEmoji('🛒')
-                );
-
-                const shopChannel = interaction.guild.channels.cache.find(c => c.name === channelName) ||
-                    interaction.guild.channels.cache.find(c => c.name === 'restock');
-                if (shopChannel) {
-                    await shopChannel.send({ embeds: [embed], components: [row] });
-                    await interaction.reply({ content: `✅ Posted in #${shopChannel.name}!`, ephemeral: true });
-                } else {
-                    await interaction.reply({ content: '❌ Could not find shop channel.', ephemeral: true });
-                }
+                modal.addComponents(new ActionRowBuilder().addComponents(descInput));
+                await interaction.showModal(modal);
                 break;
             }
 
@@ -1485,6 +1469,41 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             await interaction.reply({ content: `✅ Vouch submitted! Posted in #vouches and logged in #orders.`, ephemeral: true });
+            return;
+        }
+
+        if (interaction.customId.startsWith('product_modal_')) {
+            const channelName = interaction.customId.replace('product_modal_', '');
+            const desc = interaction.fields.getTextInputValue('product_desc');
+
+            const products = loadData('products.json');
+            const id = Date.now().toString();
+            products[id] = {
+                description: desc,
+                seller: interaction.user.id,
+                channel: channelName,
+                createdAt: new Date().toISOString()
+            };
+            saveData('products.json', products);
+
+            const embed = new EmbedBuilder()
+                .setDescription(desc)
+                .setColor('#00C853')
+                .setFooter({ text: `${STORE_NAME} · ${channelName}` })
+                .setTimestamp();
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`buy_${id}`).setLabel('Order Now').setStyle(ButtonStyle.Success).setEmoji('🛒')
+            );
+
+            const shopChannel = interaction.guild.channels.cache.find(c => c.name === channelName) ||
+                interaction.guild.channels.cache.find(c => c.name === 'restock');
+            if (shopChannel) {
+                await shopChannel.send({ embeds: [embed], components: [row] });
+                await interaction.reply({ content: `✅ Posted in #${shopChannel.name}!`, ephemeral: true });
+            } else {
+                await interaction.reply({ content: '❌ Could not find shop channel.', ephemeral: true });
+            }
             return;
         }
 
