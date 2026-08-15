@@ -791,7 +791,8 @@ client.on('interactionCreate', async (interaction) => {
                         .setColor('#00C853')
                         .setFooter({ text: `${STORE_NAME} · Order #${orderNo}` })
                         .setTimestamp();
-                    await ordersChannel.send({ embeds: [completeEmbed] });
+                    const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
+                    await orderMsg.react('/u2705').catch(() => {});
                 }
 
                 await interaction.reply({ content: `✅ Vouched for ${target.tag}! Your vouch was logged in #vouches and #orders.`, ephemeral: true });
@@ -1467,7 +1468,8 @@ client.on('interactionCreate', async (interaction) => {
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME })
                     .setTimestamp();
-                await ordersChannel.send({ embeds: [completeEmbed] });
+                const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
+                await orderMsg.react('/u2705').catch(() => {});
             }
 
             await interaction.reply({ content: `✅ Vouch submitted! Posted in #vouches and logged in #orders.`, ephemeral: true });
@@ -1671,7 +1673,8 @@ client.on('messageCreate', async (message) => {
             .setColor('#00C853')
             .setFooter({ text: `${STORE_NAME} · Confirmed Order` })
             .setTimestamp();
-        await ordersChannel.send({ embeds: [completeEmbed] });
+        const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
+        await orderMsg.react('/u2705').catch(() => {});
     }
 
     // 8) Confirm to the buyer + add a vouch reaction embed
