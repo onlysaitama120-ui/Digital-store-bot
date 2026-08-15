@@ -582,11 +582,9 @@ const commands = [
         .addUserOption(o => o.setName('user').setDescription('User to check').setRequired(false)),
     new SlashCommandBuilder()
         .setName('product')
-        .setDescription('Add a product to the shop (Seller/Admin)')
-        .addStringOption(o => o.setName('name').setDescription('Product name').setRequired(true))
-        .addStringOption(o => o.setName('price').setDescription('Price e.g. $5').setRequired(true))
-        .addStringOption(o => o.setName('description').setDescription('Product description').setRequired(true))
-        .addStringOption(o => o.setName('channel').setDescription('Shop channel: restock, game-acc, pc-parts').setRequired(false)),
+        .setDescription('Post a product (paste your full description)')
+        .addStringOption(o => o.setName('description').setDescription('Paste your full product listing').setRequired(true))
+        .addStringOption(o => o.setName('channel').setDescription('restock, game-acc, etc (default: restock)').setRequired(false)),
     new SlashCommandBuilder()
         .setName('stock')
         .setDescription('List all products in the shop'),
@@ -605,11 +603,8 @@ const commands = [
         .setDescription('Show store stats'),
     new SlashCommandBuilder()
         .setName('upi')
-        .setDescription('Show UPI payment QR code (works in tickets & DMs)')
-        .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID e.g. xero@okhdfcbank').setRequired(false))
-        .addStringOption(o => o.setName('amount').setDescription('Amount in INR e.g. 1100').setRequired(false))
-        .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false))
-        .addStringOption(o => o.setName('note').setDescription('Payment note e.g. Order #12').setRequired(false)),
+        .setDescription('Show your UPI scanner with amount')
+        .addIntegerOption(o => o.setName('amount').setDescription('Amount in ₹ e.g. 400').setRequired(true)),
     new SlashCommandBuilder()
         .setName('giveaway')
         .setDescription('Start a giveaway (Staff only)')
@@ -647,6 +642,23 @@ client.on('ready', async () => {
     // Register commands on all guilds
     for (const guild of client.guilds.cache.values()) {
         await registerCommands(guild);
+    }
+
+    // Auto-assign Verified Buyer role to anyone who has vouches
+    const vouchData = loadData('vouches.json');
+    for (const [userId, data] of Object.entries(vouchData)) {
+        if (data.reviews && data.reviews.length > 0) {
+            try {
+                const member = await guild.members.fetch(userId);
+                if (member) {
+                    const verifiedRole = guild.roles.cache.find(r => r.name === 'Verified');
+                    if (verifiedRole && !member.roles.cache.has(verifiedRole.id)) {
+                        await member.roles.add(verifiedRole);
+                        console.log('Assigned Verified role to ' + member.user.tag);
+                    }
+                }
+            } catch (e) { /* user left or not found */ }
+        }
     }
 
     client.user.setActivity(`${STORE_NAME} | /help`, { type: 'Watching' });
@@ -713,15 +725,16 @@ client.on('interactionCreate', async (interaction) => {
                 // AUTOMATICALLY post "Order Completed" in #orders when vouched
                 const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
                 if (ordersChannel) {
+                    const orderNo = vouches[target.id].count;
                     const completeEmbed = new EmbedBuilder()
-                        .setTitle('✨⭐✅ Order Completed')
-                        .setDescription(`**Buyer:** ${interaction.user.tag}\n**Seller:** ${target.tag}\n**Product:** ${product}`)
+                        .setTitle('✨ ORDER #' + orderNo)
+                        .setDescription('**Buyer:** ' + interaction.user.tag + '/n**Seller:** ' + target.tag + '/n**Product:** ' + product)
                         .addFields(
                             { name: '⭐ Vouch', value: review },
-                            { name: '🕒 Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>` }
+                            { name: '🕒 Completed', value: '<t:' + Math.floor(Date.now() / 1000) + ':R>' }
                         )
                         .setColor('#00C853')
-                        .setFooter({ text: `${STORE_NAME} · Order #${vouches[target.id].count}` })
+                        .setFooter({ text: `${STORE_NAME} · Order #${orderNo}` })
                         .setTimestamp();
                     await ordersChannel.send({ embeds: [completeEmbed] });
                 }
@@ -754,30 +767,24 @@ client.on('interactionCreate', async (interaction) => {
                 if (!interaction.member.roles.cache.find(r => ['Seller', 'Admin', 'Owner', 'Staff'].includes(r.name))) {
                     return interaction.reply({ content: '❌ You need the Seller role to add products!', ephemeral: true });
                 }
-                const name = interaction.options.getString('name');
-                const price = interaction.options.getString('price');
                 const desc = interaction.options.getString('description');
                 const channelName = interaction.options.getString('channel') || 'restock';
 
                 const products = loadData('products.json');
                 const id = Date.now().toString();
                 products[id] = {
-                    name, price, description: desc,
+                    description: desc,
                     seller: interaction.user.id,
                     channel: channelName,
                     createdAt: new Date().toISOString()
                 };
                 saveData('products.json', products);
 
+                // Post exactly as you paste it - no extra formatting
                 const embed = new EmbedBuilder()
-                    .setTitle(`🛒 ${name}`)
                     .setDescription(desc)
-                    .addFields(
-                        { name: '💲 Price', value: price, inline: true },
-                        { name: '👤 Seller', value: `<@${interaction.user.id}>`, inline: true }
-                    )
                     .setColor('#00C853')
-                    .setFooter({ text: `${STORE_NAME} · Stock drop` })
+                    .setFooter({ text: `${STORE_NAME} · ${channelName}` })
                     .setTimestamp();
 
                 const row = new ActionRowBuilder().addComponents(
@@ -788,7 +795,7 @@ client.on('interactionCreate', async (interaction) => {
                     interaction.guild.channels.cache.find(c => c.name === 'restock');
                 if (shopChannel) {
                     await shopChannel.send({ embeds: [embed], components: [row] });
-                    await interaction.reply({ content: `✅ Product posted in #${shopChannel.name}!`, ephemeral: true });
+                    await interaction.reply({ content: `✅ Posted in #${shopChannel.name}!`, ephemeral: true });
                 } else {
                     await interaction.reply({ content: '❌ Could not find shop channel.', ephemeral: true });
                 }
@@ -903,20 +910,17 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             case 'upi': {
-                // Works in order tickets AND DMs - shows scannable UPI QR
-                const upiId = interaction.options.getString('upiid') || config.upiId;
-                const amount = interaction.options.getString('amount');
-                const name = interaction.options.getString('name') || config.upiName;
-                const note = interaction.options.getString('note');
+                // Just /upi 400 - shows your scanner with ₹400
+                const amount = String(interaction.options.getInteger('amount'));
 
-                // Auto-fill note from order ticket if running there
-                let autoNote = note;
+                // Auto-fill note from order ticket
+                let autoNote = null;
                 const channelName = interaction.channel?.name || '';
-                if (!autoNote && /^order-/.test(channelName)) {
+                if (/^order-/.test(channelName)) {
                     autoNote = 'Order ' + channelName.replace('order-', '#');
                 }
 
-                const { embed, file } = await upiEmbed(upiId, amount, name, autoNote);
+                const { embed, file } = await upiEmbed(config.upiId, amount, config.upiName, autoNote);
                 const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
                 await interaction.reply(payload);
                 break;
@@ -1488,23 +1492,13 @@ client.on('messageCreate', async (message) => {
     const ordersChannel = message.guild.channels.cache.find(c => c.name === 'orders');
     if (ordersChannel) {
         const sellerTag = message.guild.members.cache.get(sellerId)?.user?.tag || (sellerId === config.ownerId ? STORE_NAME : 'Seller');
-        const divider = '━━━━━━━━━━━━━━━━━━━━';
         const vouchText = text.length > 150 ? text.slice(0, 147) + '...' : text;
         const completeEmbed = new EmbedBuilder()
-            .setTitle('✨⭐✅ ORDER COMPLETED')
-            .setDescription(
-                divider + '\n' +
-                `🧾 **Order No:**  #${orderNo}\n` +
-                `🛒 **Item:**  ${product}\n` +
-                `💲 **Price:**  ${price || 'N/A'}\n` +
-                `👤 **Buyer:**  <@${message.author.id}>\n` +
-                `🛍️ **Seller:**  ${sellerTag}\n` +
-                divider
-            )
+            .setTitle(`✨ ORDER #${orderNo}`)
+            .setDescription(`**Item:** ${product}\n**Price:** ${price || 'N/A'}\n**Buyer:** <@${message.author.id}>\n**Seller:** ${sellerTag}`)
             .addFields(
                 { name: '⭐ Vouch', value: '> ' + vouchText },
-                { name: '🕒 Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true },
-                { name: '🧾 Order No', value: `#${orderNo}`, inline: true }
+                { name: '🕒 Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
             )
             .setColor('#00C853')
             .setFooter({ text: `${STORE_NAME} · Confirmed Order` })
