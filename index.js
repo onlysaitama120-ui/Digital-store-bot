@@ -62,12 +62,29 @@ function saveData(file, data) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
 }
 
-// Format raw pasted text for Discord embeds
+// Auto-format product text - detects sections and rebuilds with proper Discord markdown
 function formatProduct(raw) {
-    return raw.trim();
+    let text = raw;
+    const NL = String.fromCharCode(10);
+    const ARROW = String.fromCharCode(8594);
+
+    // If text has no newlines (flat paste), split by known section markers
+    if (!text.includes(NL)) {
+        // Split before emoji colons and unicode emojis
+        text = text.replace(/([:📺🎬🎵📱🎮🎧])/g, NL + '$1');
+        // Split before arrows
+        const arrowPat = new RegExp(ARROW + ' ', 'g');
+        text = text.replace(arrowPat, NL + ARROW + ' ');
+    }
+
+    // Clean up multiple blank lines
+    while (text.includes(NL + NL + NL)) {
+        text = text.split(NL + NL + NL).join(NL + NL);
+    }
+    return text.trim();
 }
 
-// Build a UPI payment embed with a scannable QR code
+
 async function upiEmbed(upiId, amount, name, note) {
     if (!upiId) {
         return {
