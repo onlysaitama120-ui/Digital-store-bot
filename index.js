@@ -820,7 +820,7 @@ client.on('interactionCreate', async (interaction) => {
                 if (!interaction.member.roles.cache.find(r => ['Seller', 'Admin', 'Owner', 'Staff'].includes(r.name))) {
                     return interaction.reply({ content: '❌ You need the Seller role to add products!', ephemeral: true });
                 }
-                const channelName = interaction.options.getString('channel') || 'restock';
+                const channelName = interaction.options.getString('channel') || interaction.channel?.name || 'restock';
 
                 const modal = new ModalBuilder()
                     .setCustomId('product_modal_' + channelName)
