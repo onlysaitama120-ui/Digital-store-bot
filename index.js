@@ -62,24 +62,15 @@ function saveData(file, data) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
 }
 
-// Auto-format product text - detects sections and rebuilds with proper Discord markdown
+// Auto-format product text for Discord embeds
 function formatProduct(raw) {
-    let text = raw;
     const NL = String.fromCharCode(10);
-    const ARROW = String.fromCharCode(8594);
-
-    // If text has no newlines (flat paste), split by known section markers
-    if (!text.includes(NL)) {
-        // Split before emoji colons and unicode emojis
-        text = text.replace(/([:📺🎬🎵📱🎮🎧])/g, NL + '$1');
-        // Split before arrows
-        const arrowPat = new RegExp(ARROW + ' ', 'g');
-        text = text.replace(arrowPat, NL + ARROW + ' ');
-    }
-
-    // Clean up multiple blank lines
+    let text = raw;
+    text = text.replace(/#{1,6}[ ]/g, '');
+    text = text.replace(/:[A-Za-z0-9_]+:/g, '');
+    text = text.trim();
     while (text.includes(NL + NL + NL)) {
-        text = text.split(NL + NL + NL).join(NL + NL);
+        text = text.replace(NL + NL + NL, NL + NL);
     }
     return text.trim();
 }
