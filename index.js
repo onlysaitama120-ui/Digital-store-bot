@@ -65,11 +65,14 @@ function saveData(file, data) {
 // Build a UPI payment embed with a scannable QR code
 async function upiEmbed(upiId, amount, name, note) {
     if (!upiId) {
-        return new EmbedBuilder()
-            .setTitle('💳 UPI Payment')
-            .setDescription('❌ No UPI ID is set yet. Set `UPI_ID` (env var) or run `/upi` with your UPI ID.')
-            .setColor('#FF5555')
-            .setFooter({ text: STORE_NAME });
+        return {
+            embed: new EmbedBuilder()
+                .setTitle('💳 UPI Payment')
+                .setDescription('❌ No UPI ID is set. Run `/setupi upiid:yourname@bank` first.')
+                .setColor('#FF5555')
+                .setFooter({ text: STORE_NAME }),
+            file: null
+        };
     }
 
     // Use the owner's own UPI scanner image if it exists locally
@@ -615,7 +618,40 @@ const commands = [
         .setName('setupi')
         .setDescription('Set your UPI ID for payments (Staff only)')
         .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID e.g. name@okhdfcbank').setRequired(true))
-        .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false))
+        .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('lock')
+        .setDescription('Lock a channel')
+        .addChannelOption(o => o.setName('channel').setDescription('Channel to lock').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('unlock')
+        .setDescription('Unlock a channel')
+        .addChannelOption(o => o.setName('channel').setDescription('Channel to unlock').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('slowmode')
+        .setDescription('Set slowmode on a channel')
+        .addIntegerOption(o => o.setName('seconds').setDescription('Slowmode delay (0 to disable)').setRequired(true))
+        .addChannelOption(o => o.setName('channel').setDescription('Channel to set slowmode').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('kick')
+        .setDescription('Kick a member')
+        .addUserOption(o => o.setName('user').setDescription('User to kick').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('ban')
+        .setDescription('Ban a member')
+        .addUserOption(o => o.setName('user').setDescription('User to ban').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('mute')
+        .setDescription('Timeout a member')
+        .addUserOption(o => o.setName('user').setDescription('User to mute').setRequired(true))
+        .addIntegerOption(o => o.setName('minutes').setDescription('Duration in minutes (default 10)').setRequired(false))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('unmute')
+        .setDescription('Remove timeout from a member')
+        .addUserOption(o => o.setName('user').setDescription('User to unmute').setRequired(true))
 ];
 
 async function registerCommands(guild) {
@@ -991,6 +1027,88 @@ client.on('interactionCreate', async (interaction) => {
 
                 // Schedule the draw
                 setTimeout(() => endGiveaway(gId, interaction.guild, channel, msg), hours * 3600000);
+                break;
+            }
+
+            case 'lock': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+                    return interaction.reply({ content: '❌ You need Manage Channels permission!', ephemeral: true });
+                }
+                const ch = interaction.options.getChannel('channel') || interaction.channel;
+                await ch.permissionOverwrites.edit(interaction.guild.id, { SendMessages: false });
+                await interaction.reply({ content: `🔒 Locked ${ch}`, ephemeral: true });
+                break;
+            }
+
+            case 'unlock': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+                    return interaction.reply({ content: '❌ You need Manage Channels permission!', ephemeral: true });
+                }
+                const ch = interaction.options.getChannel('channel') || interaction.channel;
+                await ch.permissionOverwrites.edit(interaction.guild.id, { SendMessages: true });
+                await interaction.reply({ content: `🔓 Unlocked ${ch}`, ephemeral: true });
+                break;
+            }
+
+            case 'slowmode': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
+                    return interaction.reply({ content: '❌ You need Manage Channels permission!', ephemeral: true });
+                }
+                const ch = interaction.options.getChannel('channel') || interaction.channel;
+                const sec = Math.min(interaction.options.getInteger('seconds'), 21600);
+                await ch.setRateLimitPerUser(sec);
+                await interaction.reply({ content: `🐌 Slowmode set to ${sec}s in ${ch}`, ephemeral: true });
+                break;
+            }
+
+            case 'kick': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.KickMembers)) {
+                    return interaction.reply({ content: '❌ You need Kick Members permission!', ephemeral: true });
+                }
+                const target = interaction.options.getMember('user');
+                const reason = interaction.options.getString('reason') || 'No reason';
+                if (!target) return interaction.reply({ content: '❌ User not found in this server!', ephemeral: true });
+                if (!target.kickable) return interaction.reply({ content: '❌ I cannot kick this user!', ephemeral: true });
+                await target.kick(reason);
+                await interaction.reply({ content: `👢 Kicked ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
+                break;
+            }
+
+            case 'ban': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) {
+                    return interaction.reply({ content: '❌ You need Ban Members permission!', ephemeral: true });
+                }
+                const target = interaction.options.getMember('user');
+                const reason = interaction.options.getString('reason') || 'No reason';
+                if (!target) return interaction.reply({ content: '❌ User not found in this server!', ephemeral: true });
+                if (!target.bannable) return interaction.reply({ content: '❌ I cannot ban this user!', ephemeral: true });
+                await target.ban({ reason });
+                await interaction.reply({ content: `🔨 Banned ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
+                break;
+            }
+
+            case 'mute': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+                    return interaction.reply({ content: '❌ You need Moderate Members permission!', ephemeral: true });
+                }
+                const target = interaction.options.getMember('user');
+                const mins = interaction.options.getInteger('minutes') || 10;
+                const reason = interaction.options.getString('reason') || 'No reason';
+                if (!target) return interaction.reply({ content: '❌ User not found!', ephemeral: true });
+                if (!target.moderatable) return interaction.reply({ content: '❌ I cannot mute this user!', ephemeral: true });
+                await target.timeout(mins * 60000, reason);
+                await interaction.reply({ content: `🔇 Muted ${target.user.tag} for ${mins} min | Reason: ${reason}`, ephemeral: true });
+                break;
+            }
+
+            case 'unmute': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
+                    return interaction.reply({ content: '❌ You need Moderate Members permission!', ephemeral: true });
+                }
+                const target = interaction.options.getMember('user');
+                if (!target) return interaction.reply({ content: '❌ User not found!', ephemeral: true });
+                await target.timeout(null);
+                await interaction.reply({ content: `🔊 Unmuted ${target.user.tag}`, ephemeral: true });
                 break;
             }
         }
