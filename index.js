@@ -218,12 +218,14 @@ async function antiScamCheck(message) {
     const text = message.content;
     if (!text) return false;
 
-    // Mass mention spam
+    // Mass mention spam - only if combined with scam words
     if (message.mentions.everyone && text.length < 100) {
-        return true;
+        const hasScam = SCAM_WORDS.some(w => text.toLowerCase().includes(w));
+        if (hasScam) return true;
     }
     if (message.mentions.users.size > 10) {
-        return true;
+        const hasScam = SCAM_WORDS.some(w => text.toLowerCase().includes(w));
+        if (hasScam) return true;
     }
 
     for (const pat of SCAM_PATTERNS) {
