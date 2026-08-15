@@ -599,7 +599,7 @@ const commands = [
     new SlashCommandBuilder()
         .setName('product')
         .setDescription('Post a product (paste your full description)')
-        .addStringOption(o => o.setName('description').setDescription('Paste your full product listing').setRequired(true))
+        .addStringOption(o => o.setName('description').setDescription('Paste your full product listing (up to 4000 chars)').setRequired(true).setMaxLength(4000))
         .addStringOption(o => o.setName('channel').setDescription('restock, game-acc, etc (default: restock)').setRequired(false)),
     new SlashCommandBuilder()
         .setName('stock')
@@ -664,7 +664,11 @@ const commands = [
     new SlashCommandBuilder()
         .setName('unmute')
         .setDescription('Remove timeout from a member')
-        .addUserOption(o => o.setName('user').setDescription('User to unmute').setRequired(true))
+        .addUserOption(o => o.setName('user').setDescription('User to unmute').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('purge')
+        .setDescription('Bulk delete messages')
+        .addIntegerOption(o => o.setName('count').setDescription('Number of messages to delete (max 100)').setRequired(true))
 ];
 
 async function registerCommands(guild) {
@@ -1122,6 +1126,18 @@ client.on('interactionCreate', async (interaction) => {
                 if (!target) return interaction.reply({ content: '❌ User not found!', ephemeral: true });
                 await target.timeout(null);
                 await interaction.reply({ content: `🔊 Unmuted ${target.user.tag}`, ephemeral: true });
+                break;
+            }
+
+            case 'purge': {
+                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
+                    return interaction.reply({ content: '❌ You need Manage Messages permission!', ephemeral: true });
+                }
+                const count = Math.min(interaction.options.getInteger('count'), 100);
+                if (count < 1) return interaction.reply({ content: '❌ Must delete at least 1 message!', ephemeral: true });
+                await interaction.deferReply({ ephemeral: true });
+                const deleted = await interaction.channel.bulkDelete(count, true);
+                await interaction.editReply({ content: `🗑️ Deleted ${deleted.size} messages.` });
                 break;
             }
         }
