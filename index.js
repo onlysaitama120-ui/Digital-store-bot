@@ -1203,8 +1203,14 @@ client.on('interactionCreate', async (interaction) => {
             await interaction.reply({ content: `Ticket created: ${ticketChannel}`, ephemeral: true });
         }
 
-        // Close ticket
+        // Close ticket - Admin/Owner only
         if (interaction.customId === 'close_ticket') {
+            const isStaffClose = interaction.member.roles.cache.some(r => ['Owner', 'Admin'].includes(r.name)) ||
+                interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+            if (!isStaffClose) {
+                return interaction.reply({ content: '❌ Only Admins or Owner can close tickets!', ephemeral: true });
+            }
+
             const embed = new EmbedBuilder()
                 .setTitle('🔒 Ticket Closed')
                 .setDescription(`Closed by ${interaction.user.tag}`)
@@ -1261,18 +1267,23 @@ client.on('interactionCreate', async (interaction) => {
                 .setTimestamp();
 
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Mark Complete').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId(`upi_${orderId}`).setLabel('💳 Pay via UPI').setStyle(ButtonStyle.Primary).setEmoji('💳'),
-                new ButtonBuilder().setCustomId(`vouch_${orderId}_${interaction.user.id}`).setLabel('⭐ Vouch').setStyle(ButtonStyle.Secondary).setEmoji('⭐'),
+                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('💳 Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji('💳'),
+                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Confirm & Complete').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
             );
 
             await ticketChannel.send({ content: `<@${interaction.user.id}> <@${product.seller}>`, embeds: [embed], components: [row] });
-            await interaction.reply({ content: `Order #${orderNo} created! Channel: ${ticketChannel}`, ephemeral: true });
+            await interaction.reply({ content: `Order #${orderNo} created! Staff will review shortly. Channel: ${ticketChannel}`, ephemeral: true });
         }
 
-        // Complete order
+        // Complete order - Staff only
         if (interaction.customId.startsWith('complete_')) {
+            const isStaffComplete = interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff', 'Seller'].includes(r.name)) ||
+                interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+            if (!isStaffComplete) {
+                return interaction.reply({ content: '❌ Only staff can confirm orders!', ephemeral: true });
+            }
+
             const orderId = interaction.customId.replace('complete_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
@@ -1288,39 +1299,51 @@ client.on('interactionCreate', async (interaction) => {
             if (ordersChannel) {
                 const embed = new EmbedBuilder()
                     .setTitle('✅ Order Confirmed')
-                    .setDescription(`**Order No:** ${order.orderNo}\n**Product:** ${order.product}\n**Quantity:** ${order.quantity}\n**Buyer:** <@${order.buyer}>`)
+                    .setDescription(`**Order No:** ${order.orderNo}
+**Product:** ${order.product}
+**Quantity:** ${order.quantity}
+**Buyer:** <@${order.buyer}>`)
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME })
                     .setTimestamp();
                 await ordersChannel.send({ embeds: [embed] });
             }
 
-            await interaction.reply({ content: `✅ Order #${order.orderNo} completed!`, ephemeral: true });
+            await interaction.reply({ content: `✅ Order #${order.orderNo} confirmed by staff!` });
 
-            // Invite buyer to vouch
+            // Now show vouch button to buyer ONLY after staff confirmed
             const vouchRow = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setCustomId(`vouch_${orderId}_${order.buyer}`).setLabel('⭐ Vouch Now').setStyle(ButtonStyle.Secondary).setEmoji('⭐')
             );
             const vouchPrompt = new EmbedBuilder()
                 .setTitle('🎉 Order Complete!')
-                .setDescription(`<@${order.buyer}>, your order **#${order.orderNo}** (${order.product}) is complete! 🎉\n\nClick **⭐ Vouch Now** to leave a vouch. Your vouch will automatically be posted in #vouches and logged in #orders!`)
+                .setDescription(`<@${order.buyer}>, your order **#${order.orderNo}** (${order.product}) has been **confirmed by staff**! 🎉
+
+Click **⭐ Vouch Now** to leave a vouch.`)
                 .setColor('#FFD700')
                 .setFooter({ text: STORE_NAME });
             await interaction.channel.send({ embeds: [vouchPrompt], components: [vouchRow] });
         }
 
-        // UPI payment button in order ticket -> shows QR in the ticket
-        if (interaction.customId.startsWith('upi_')) {
-            const orderId = interaction.customId.replace('upi_', '');
+// UPI payment button in order ticket -> staff sends QR to buyer
+        if (interaction.customId.startsWith('send_upi_')) {
+            const isStaffUPI = interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
+                interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+            if (!isStaffUPI) {
+                return interaction.reply({ content: '❌ Only staff can send payment QR!', ephemeral: true });
+            }
+
+            const orderId = interaction.customId.replace('send_upi_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
+            if (!order) return interaction.reply({ content: '❌ Order not found!', ephemeral: true });
 
             const amount = order?.price ? String(order.price).replace(/[^0-9.]/g, '') : '';
             const note = order ? 'Order #' + order.orderNo + ' - ' + order.product : 'Order payment';
 
             const { embed, file } = await upiEmbed(config.upiId, amount, null, note);
             const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
-            await interaction.reply(payload);
+            await interaction.reply({ content: `<@${order.buyer}>, here is the payment QR:`, ...payload });
             return;
         }
 
@@ -1365,6 +1388,11 @@ client.on('interactionCreate', async (interaction) => {
             const orders = loadData('orders.json');
             const order = orders[orderId];
             if (!order) return interaction.reply({ content: '❌ Order not found!', ephemeral: true });
+
+            // Only allow vouch if staff has completed the order
+            if (!order.completedBy) {
+                return interaction.reply({ content: '❌ Order must be confirmed by staff before you can vouch! Wait for staff to complete your order.', ephemeral: true });
+            }
 
             const modal = new ModalBuilder()
                 .setCustomId(`vouch_modal_${orderId}`)
@@ -1553,14 +1581,14 @@ client.on('interactionCreate', async (interaction) => {
                 .setTimestamp();
 
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Mark Complete').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId(`upi_${orderId}`).setLabel('💳 Pay via UPI').setStyle(ButtonStyle.Primary).setEmoji('💳'),
-                new ButtonBuilder().setCustomId(`vouch_${orderId}_${interaction.user.id}`).setLabel('⭐ Vouch').setStyle(ButtonStyle.Secondary).setEmoji('⭐'),
+                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('💳 Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji('💳'),
+                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Confirm & Complete').setStyle(ButtonStyle.Success),
                 new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
             );
 
-            await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
-            await interaction.reply({ content: `✅ Order #${orderNo} placed! Channel: ${ticketChannel}`, ephemeral: true });
+            await ticketChannel.send({ content: `<@${interaction.user.id}>
+<@${config.ownerId}>`, embeds: [embed], components: [row] });
+            await interaction.reply({ content: `✅ Order #${orderNo} placed! Staff will review shortly.`, ephemeral: true });
         }
     }
 });
