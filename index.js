@@ -1219,6 +1219,7 @@ client.on('interactionCreate', async (interaction) => {
 
             const logChannel = interaction.guild.channels.cache.find(c => c.name === 'ticket-logs');
             if (logChannel) await logChannel.send({ embeds: [embed] });
+            await interaction.reply({ content: '🔒 Closing ticket...' });
             await interaction.channel.delete();
         }
 
@@ -1284,10 +1285,12 @@ client.on('interactionCreate', async (interaction) => {
                 return interaction.reply({ content: '❌ Only staff can confirm orders!', ephemeral: true });
             }
 
+            await interaction.deferReply();
+
             const orderId = interaction.customId.replace('complete_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.reply({ content: '❌ Order not found!', ephemeral: true });
+            if (!order) return interaction.editReply({ content: '❌ Order not found!' });
 
             order.status = '✅ Completed';
             order.completedBy = interaction.user.id;
@@ -1309,7 +1312,7 @@ client.on('interactionCreate', async (interaction) => {
                 await ordersChannel.send({ embeds: [embed] });
             }
 
-            await interaction.reply({ content: `✅ Order #${order.orderNo} confirmed by staff!` });
+            await interaction.editReply({ content: `✅ Order #${order.orderNo} confirmed by staff!` });
 
             // Now show vouch button to buyer ONLY after staff confirmed
             const vouchRow = new ActionRowBuilder().addComponents(
@@ -1333,17 +1336,19 @@ Click **⭐ Vouch Now** to leave a vouch.`)
                 return interaction.reply({ content: '❌ Only staff can send payment QR!', ephemeral: true });
             }
 
+            await interaction.deferReply();
+
             const orderId = interaction.customId.replace('send_upi_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.reply({ content: '❌ Order not found!', ephemeral: true });
+            if (!order) return interaction.editReply({ content: '❌ Order not found!' });
 
             const amount = order?.price ? String(order.price).replace(/[^0-9.]/g, '') : '';
             const note = order ? 'Order #' + order.orderNo + ' - ' + order.product : 'Order payment';
 
             const { embed, file } = await upiEmbed(config.upiId, amount, null, note);
             const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
-            await interaction.reply({ content: `<@${order.buyer}>, here is the payment QR:`, ...payload });
+            await interaction.editReply({ content: `<@${order.buyer}>, here is the payment QR:`, ...payload });
             return;
         }
 
