@@ -695,6 +695,10 @@ const commands = [
         .setName('purge')
         .setDescription('Bulk delete messages')
         .addIntegerOption(o => o.setName('count').setDescription('Number of messages to delete (max 100)').setRequired(true)),
+    new SlashCommandBuilder().setName('afk').setDescription('Set AFK status').addStringOption(o => o.setName('reason').setDescription('Why are you AFK?').setRequired(false)),
+    new SlashCommandBuilder().setName('earnings').setDescription('View store earnings (Staff only)'),
+    new SlashCommandBuilder().setName('blacklist').setDescription('Blacklist a user (Staff only)').addUserOption(o => o.setName('user').setDescription('User').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    new SlashCommandBuilder().setName('unblacklist').setDescription('Remove from blacklist').addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
 ];
 
 async function registerCommands(guild) {
@@ -966,6 +970,9 @@ client.on('interactionCreate', async (interaction) => {
                         { name: '/confirm <orderno>', value: 'Confirm order (Staff)' },
                         { name: '/announcement', value: 'Send announcement (Staff)' },
                         { name: '/renumber', value: 'Fix order numbers (Owner)' },
+                        { name: '/earnings', value: 'View earnings (Staff)' },
+                        { name: '/afk', value: 'Set AFK status' },
+                        { name: '/blacklist', value: 'Blacklist scammer (Staff)' },
                         { name: '/help', value: 'Show this menu' }
                     )
                     .setFooter({ text: STORE_NAME });
@@ -1220,13 +1227,70 @@ client.on('interactionCreate', async (interaction) => {
 
             case 'purge': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-                    return interaction.reply({ content: 'âŒ You need Manage Messages permission!', ephemeral: true });
+                    return interaction.reply({ content: '❌ You need Manage Messages permission!', ephemeral: true });
                 }
                 const count = Math.min(interaction.options.getInteger('count'), 100);
-                if (count < 1) return interaction.reply({ content: 'âŒ Must delete at least 1 message!', ephemeral: true });
+                if (count < 1) return interaction.reply({ content: '❌ Must delete at least 1 message!', ephemeral: true });
                 await interaction.deferReply({ ephemeral: true });
                 const deleted = await interaction.channel.bulkDelete(count, true);
-                await interaction.editReply({ content: `ðŸ—‘ï¸ Deleted ${deleted.size} messages.` });
+                await interaction.editReply({ content: `🗑️ Deleted ${deleted.size} messages.` });
+                break;
+            }
+
+            case 'afk': {
+                const afkData = loadData('afk.json');
+                const afkReason = interaction.options.getString('reason') || 'AFK';
+                afkData[interaction.user.id] = { reason: afkReason, setAt: Date.now(), setAtIso: new Date().toISOString() };
+                saveData('afk.json', afkData);
+                await interaction.reply({ content: '✅ You are now AFK: **' + afkReason + '**', ephemeral: true });
+                break;
+            }
+
+            case 'earnings': {
+                const isStaffEarn = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+                if (!isStaffEarn) return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                const orders = loadData('orders.json');
+                const allOrders = Object.values(orders);
+                const completed = allOrders.filter(o => o.status && o.status.includes('Completed'));
+                const pending = allOrders.filter(o => o.status && o.status.includes('Pending'));
+                let totalRevenue = 0;
+                completed.forEach(o => { if (o.price && o.price !== 'TBD' && o.price !== 'N/A') { const num = parseFloat(String(o.price).replace(/[^0-9.]/g, '')); if (!isNaN(num)) totalRevenue += num; } });
+                const today = new Date().toDateString();
+                const todayOrders = completed.filter(o => { if (!o.completedAt && !o.createdAt) return false; return new Date(o.completedAt || o.createdAt).toDateString() === today; });
+                const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+                const weekOrders = completed.filter(o => { const d = new Date(o.completedAt || o.createdAt).getTime(); return d > weekAgo; });
+                const productCount = {};
+                completed.forEach(o => { const p = o.product || 'Unknown'; productCount[p] = (productCount[p] || 0) + 1; });
+                const topProducts = Object.entries(productCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                const embed = new EmbedBuilder().setTitle('📊 ' + STORE_NAME + ' Earnings').setColor('#00E5FF').setFooter({ text: STORE_NAME }).setTimestamp()
+                    .addFields({ name: '💰 Total Revenue', value: '₹' + totalRevenue.toFixed(2), inline: true }, { name: '✅ Completed', value: '' + completed.length, inline: true }, { name: '⏳ Pending', value: '' + pending.length, inline: true }, { name: '📅 Today', value: '' + todayOrders.length + ' orders', inline: true }, { name: '📆 This Week', value: '' + weekOrders.length + ' orders', inline: true }, { name: '🛒 Total Orders', value: '' + allOrders.length, inline: true });
+                if (topProducts.length > 0) embed.addFields({ name: '🏆 Top Products', value: topProducts.map(([name, count], i) => (i + 1) + '. ' + name.slice(0, 25) + ' (' + count + ')').join('/n') });
+                await interaction.reply({ embeds: [embed], ephemeral: true });
+                break;
+            }
+
+            case 'blacklist': {
+                const isStaffBl = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+                if (!isStaffBl) return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                const blTarget = interaction.options.getUser('user');
+                const blReason = interaction.options.getString('reason') || 'No reason';
+                const blacklist = loadData('blacklist.json');
+                if (blacklist[blTarget.id]) return interaction.reply({ content: '❌ ' + blTarget.tag + ' is already blacklisted!', ephemeral: true });
+                blacklist[blTarget.id] = { tag: blTarget.tag, reason: blReason, blacklistedBy: interaction.user.id, blacklistedAt: new Date().toISOString() };
+                saveData('blacklist.json', blacklist);
+                await interaction.reply({ content: '🚫 **' + blTarget.tag + '** blacklisted. Reason: ' + blReason, ephemeral: true });
+                break;
+            }
+
+            case 'unblacklist': {
+                const isStaffUbl = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+                if (!isStaffUbl) return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                const ublTarget = interaction.options.getUser('user');
+                const blacklist = loadData('blacklist.json');
+                if (!blacklist[ublTarget.id]) return interaction.reply({ content: '❌ ' + ublTarget.tag + ' is not blacklisted.', ephemeral: true });
+                delete blacklist[ublTarget.id];
+                saveData('blacklist.json', blacklist);
+                await interaction.reply({ content: '✅ **' + ublTarget.tag + '** removed from blacklist.', ephemeral: true });
                 break;
             }
         }
@@ -1242,6 +1306,9 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton()) {
         // Place Order
         if (interaction.customId === 'place_order') {
+            // BLACKLIST CHECK
+            const blCheck = loadData('blacklist.json');
+            if (blCheck[interaction.user.id]) return interaction.reply({ content: '❌ You are blacklisted. Reason: ' + (blCheck[interaction.user.id].reason || 'N/A'), ephemeral: true });
             const modal = new ModalBuilder()
                 .setCustomId('order_modal')
                 .setTitle(`ðŸ›’ ${STORE_NAME} - Place Order`);
@@ -1281,6 +1348,9 @@ client.on('interactionCreate', async (interaction) => {
 
         // Support ticket
         if (interaction.customId === 'support_ticket') {
+            // BLACKLIST CHECK
+            const blCheck2 = loadData('blacklist.json');
+            if (blCheck2[interaction.user.id]) return interaction.reply({ content: '❌ You are blacklisted. Reason: ' + (blCheck2[interaction.user.id].reason || 'N/A'), ephemeral: true });
             const ticketChannel = await interaction.guild.channels.create({
                 name: `support-${interaction.user.username}`,
                 type: ChannelType.GuildText,
@@ -1413,6 +1483,17 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             await interaction.editReply({ content: `âœ… Order #${order.orderNo} confirmed by staff!` });
+
+            // AUTO-DM: Notify buyer via DM
+            try {
+                const dmBuyer = await interaction.guild.members.fetch(order.buyer);
+                if (dmBuyer) {
+                    const dmEmbed = new EmbedBuilder().setTitle('✅ Order Confirmed!')
+                        .setDescription('Your order **#' + order.orderNo + '** (' + order.product + ') has been confirmed by staff!')
+                        .setColor('#00C853').setFooter({ text: STORE_NAME }).setTimestamp();
+                    await dmBuyer.send({ embeds: [dmEmbed] }).catch(() => {});
+                }
+            } catch (e) { /* DM failed - user may have DMs disabled */ }
 
             // Now show vouch button to buyer ONLY after staff confirmed
                 // FIX: Use colon separator for customId
@@ -1854,6 +1935,31 @@ client.on('messageCreate', async (message) => {
         .setColor('#FFD700')
         .setFooter({ text: `${STORE_NAME} Â· Vouch #${vouches[sellerId].count}` });
     await message.channel.send({ embeds: [vouchEmbed] });
+});
+
+// ==================== AFK HANDLER ====================
+client.on('messageCreate', async (message) => {
+    if (message.author.bot || !message.guild) return;
+    // Check if mentioned users are AFK
+    if (message.mentions.users.size > 0) {
+        const afkData = loadData('afk.json');
+        for (const [userId, afk] of Object.entries(afkData)) {
+            if (message.mentions.users.has(userId)) {
+                const member = message.guild.members.cache.get(userId);
+                const name = member ? member.user.tag : userId;
+                const duration = Math.floor((Date.now() - afk.setAt) / 60000);
+                const timeStr = duration < 60 ? duration + 'm' : Math.floor(duration / 60) + 'h ' + (duration % 60) + 'm';
+                await message.channel.send('💤 **' + name + '** is AFK: ' + afk.reason + ' (for ' + timeStr + ')').catch(() => {});
+            }
+        }
+    }
+    // Remove AFK when user sends a message
+    const afkData2 = loadData('afk.json');
+    if (afkData2[message.author.id]) {
+        delete afkData2[message.author.id];
+        saveData('afk.json', afkData2);
+        await message.channel.send('✅ Welcome back <@' + message.author.id + '>! AFK removed.').catch(() => {});
+    }
 });
 
 // ==================== DM COMMANDS (FALLBACK) ====================
