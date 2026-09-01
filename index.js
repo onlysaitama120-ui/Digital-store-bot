@@ -2049,4 +2049,16 @@ if (!config.token || config.token === 'YOUR_BOT_TOKEN_HERE') {
     console.error('âŒ Please set your bot token in config.json (or TOKEN env var)!');
     process.exit(1);
 }
+
+// Simple HTTP server to keep Render alive (no open ports = service gets killed)
+const http = require('http');
+const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bot is running!');
+});
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log('Health check server running on port ' + PORT);
+});
+
 client.login(config.token);
