@@ -2056,25 +2056,23 @@ if (process.env.TOKEN || process.env.DISCORD_TOKEN) {
     console.log('Using token from environment variable.');
 }
 if (!config.token || config.token === 'YOUR_BOT_TOKEN_HERE') {
-    console.error(' Please set your bot token in config.json (or TOKEN env var)!');
+    console.error('Please set your bot token in config.json (or TOKEN env var)!');
     process.exit(1);
 }
 
-// Simple HTTP server to keep Render alive (no open ports = service gets killed)
+// Health server MUST start first to keep Render alive
 const http = require('http');
-const server = http.createServer((req, res) => {
+const PORT = process.env.PORT || 3000;
+http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('Bot is running!');
-});
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-    console.log('Health check server running on port ' + PORT);
+}).listen(PORT, () => {
+    console.log('Health check server on port ' + PORT);
 });
 
-// Global error handler - prevent crashes from expired interactions
-process.on('unhandledRejection', (error) => {
-    console.error('Unhandled rejection:', error.message || error);
-    // Don't crash on Discord API errors (expired interactions, etc.)
+// Global error handler - prevent crashes
+process.on('unhandledRejection', (err) => {
+    console.error('Unhandled:', err.message || err);
 });
 
 client.login(config.token);
