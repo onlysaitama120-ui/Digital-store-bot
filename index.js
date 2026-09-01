@@ -327,7 +327,7 @@ async function replaceEmbed(channel, title, newEmbed, row) {
     }
 }
 
-let orderCounter = loadData('counter.json').orderCounter || 0;
+let orderCounter = loadData('counter.json').orderCounter || 20;
 
 // FIX: Persistent order counter - always reads from disk and saves
 function getNextOrderNo() {
@@ -1842,15 +1842,10 @@ client.on('messageCreate', async (message) => {
         const snowflake = text.match(/([0-9]{17,20})/);
         if (snowflake) sellerId = snowflake[1];
     }
-    // Validate seller is a real guild member
-    if (sellerId) {
-        const sellerMember = message.guild.members.cache.get(sellerId);
-        if (!sellerMember) sellerId = null;
-    }
     if (!sellerId) sellerId = config.ownerId; // fallback to store owner
     if (!sellerId) {
         // No seller found - ask user to mention the seller
-        await message.reply('⚠️ Please mention the seller! Example: `+legit bought nitro 1m rs600 @Seller`').catch(() => {});
+        await message.reply('Please mention the seller! Example: `+legit bought nitro 1m rs600 @Seller`').catch(() => {});
         return;
     }
 
