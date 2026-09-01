@@ -705,11 +705,8 @@ async function registerCommands(guild) {
     const rest = new REST({ version: '10' }).setToken(config.token);
     try {
         console.log('Registering slash commands...');
-        // Global registration lets commands (like /upi) work in DMs too
+        // Only register globally to avoid duplicate commands
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-        if (guild) {
-            await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands });
-        }
         console.log('Slash commands registered!');
     } catch (e) {
         console.error('Failed to register commands:', e.message);
