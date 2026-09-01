@@ -705,7 +705,11 @@ async function registerCommands(guild) {
     const rest = new REST({ version: '10' }).setToken(config.token);
     try {
         console.log('Registering slash commands...');
-        // Only register globally to avoid duplicate commands
+        // Register per-guild for instant availability
+        if (guild) {
+            await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands });
+        }
+        // Also register globally (takes up to 1 hour)
         await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
         console.log('Slash commands registered!');
     } catch (e) {
