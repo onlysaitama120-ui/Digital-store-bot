@@ -764,12 +764,17 @@ client.on('interactionCreate', async (interaction) => {
         switch (commandName) {
             case 'setup': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.reply({ content: 'âŒ You need Administrator permission!', ephemeral: true });
+                    return interaction.reply({ content: '❌ Admin only!', ephemeral: true });
                 }
-                await interaction.reply({ content: 'â³ Setting up server...', ephemeral: true });
-                await setupServer(interaction.guild);
-                await registerCommands(interaction.guild);
-                await interaction.followUp({ content: 'âœ… Server setup complete!', ephemeral: true });
+                await interaction.deferReply({ ephemeral: true });
+                try {
+                    await setupServer(interaction.guild);
+                    await registerCommands(interaction.guild);
+                    await interaction.editReply({ content: '✅ Setup complete!' });
+                } catch (e) {
+                    console.error('Setup error:', e);
+                    await interaction.editReply({ content: '⚠️ Setup done with errors.' }).catch(() => {});
+                }
                 break;
             }
 
@@ -2059,6 +2064,12 @@ const server = http.createServer((req, res) => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
     console.log('Health check server running on port ' + PORT);
+});
+
+// Global error handler - prevent crashes from expired interactions
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled rejection:', error.message || error);
+    // Don't crash on Discord API errors (expired interactions, etc.)
 });
 
 client.login(config.token);
