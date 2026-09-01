@@ -1,22 +1,20 @@
-const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
+const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
+const http = require('http');
 
-// Load config.json if present, otherwise rely on environment variables.
-// Never commit config.json to GitHub - use TOKEN / GUILD_ID / OWNER_ID env vars.
+console.log('Starting Xero Store Bot...');
+
+// ==================== CONFIG ====================
 let config = {};
-try {
-    config = require('./config.json');
-} catch (e) {
-    console.log('config.json not found - using environment variables.');
-}
+try { config = require('./config.json'); } catch (e) { console.log('config.json not found - using environment variables.'); }
 config.token = process.env.TOKEN || process.env.DISCORD_TOKEN || config.token;
 config.guildId = process.env.GUILD_ID || config.guildId || '';
 config.ownerId = process.env.OWNER_ID || config.ownerId || '';
 config.upiId = process.env.UPI_ID || config.upiId || '';
 config.upiName = process.env.UPI_NAME || config.upiName || "Xero's Store";
 
-// Auto-detect UPI ID from the owner's scanner image if not configured
+// Auto-detect UPI from QR image
 try {
     if (!config.upiId && fs.existsSync(path.join(__dirname, 'upi-qr.png'))) {
         const { PNG } = require('pngjs');
@@ -28,12 +26,10 @@ try {
             const pn = new URLSearchParams(new URL(code.data).search).get('pn');
             if (pa) config.upiId = pa;
             if (pn) config.upiName = decodeURIComponent(pn);
-            console.log('Auto-detected UPI ID from scanner: ' + config.upiId);
+            console.log('Auto-detected UPI: ' + config.upiId);
         }
     }
-} catch (e) {
-    console.log('QR auto-detect skipped: ' + e.message);
-}
+} catch (e) { console.log('QR auto-detect skipped: ' + e.message); }
 
 const client = new Client({
     intents: [
@@ -48,51 +44,42 @@ const client = new Client({
 
 const STORE_NAME = "Xero's Store";
 
-// Data storage
+// ==================== DATA STORAGE ====================
 const dataDir = path.join(__dirname, 'data');
 if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir);
 
 function loadData(file) {
-    const filePath = path.join(dataDir, file);
-    if (!fs.existsSync(filePath)) return {};
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const fp = path.join(dataDir, file);
+    if (!fs.existsSync(fp)) return {};
+    try { return JSON.parse(fs.readFileSync(fp, 'utf8')); } catch (e) { return {}; }
 }
 
 function saveData(file, data) {
     fs.writeFileSync(path.join(dataDir, file), JSON.stringify(data, null, 2));
 }
 
-// Auto-format product text for Discord embeds
-function formatProduct(raw) {
-    const NL = String.fromCharCode(10);
-    let text = raw;
-    text = text.replace(/#{1,6}[ ]/g, '');
-    text = text.replace(/:[A-Za-z0-9_]+:/g, '');
-    text = text.trim();
-    while (text.includes(NL + NL + NL)) {
-        text = text.replace(NL + NL + NL, NL + NL);
-    }
-    return text.trim();
+// ==================== PERSISTENT ORDER COUNTER ====================
+function getNextOrderNo() {
+    const counter = loadData('counter.json');
+    const next = (counter.orderCounter || 0) + 1;
+    saveData('counter.json', { orderCounter: next });
+    return next;
 }
 
-
+// ==================== UPI EMBED ====================
 async function upiEmbed(upiId, amount, name, note) {
     if (!upiId) {
-        return {
+        return { 
             embed: new EmbedBuilder()
-                .setTitle(' UPI Payment')
-                .setDescription(' No UPI ID is set. Run `/setupi upiid:yourname@bank` first.')
+                .setTitle('💳 UPI Payment')
+                .setDescription('❌ No UPI ID is set. Run `/setupi upiid:yourname@bank` first.')
                 .setColor('#FF5555')
                 .setFooter({ text: STORE_NAME }),
-            file: null
+            file: null 
         };
     }
-
-    // Use the owner's own UPI scanner image if it exists locally
     const localQr = path.join(__dirname, 'upi-qr.png');
     const hasLocalQr = fs.existsSync(localQr);
-
-    // UPI deep link (works with GPay / PhonePe / Paytm / BHIM)
     const params = new URLSearchParams();
     params.set('pa', upiId);
     params.set('pn', name || config.upiName || STORE_NAME);
@@ -100,104 +87,71 @@ async function upiEmbed(upiId, amount, name, note) {
     params.set('cu', 'INR');
     if (note) params.set('tn', note);
     const upiLink = 'upi://pay?' + params.toString();
-
-    // QR code image: use uploaded scanner, else generate one
-    const qrUrl = hasLocalQr
-        ? 'attachment://upi-qr.png'
-        : 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(upiLink);
-
+    const qrUrl = hasLocalQr ? 'attachment://upi-qr.png' : 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(upiLink);
     const embed = new EmbedBuilder()
-        .setTitle(' UPI Payment Details')
-        .setDescription(`Scan the **QR code** below with any UPI app (GPay, PhonePe, Paytm, BHIM) or pay directly to the UPI ID.`)
+        .setTitle('💳 UPI Payment Details')
+        .setDescription('Scan the **QR code** below with any UPI app (GPay, PhonePe, Paytm, BHIM) or pay directly to the UPI ID.')
         .setImage(qrUrl)
         .addFields(
-            { name: ' UPI ID', value: '**' + upiId + '**', inline: true },
-            { name: ' Payee', value: name || config.upiName || STORE_NAME, inline: true }
+            { name: '🏦 UPI ID', value: '**' + upiId + '**', inline: true },
+            { name: '👤 Payee', value: name || config.upiName || STORE_NAME, inline: true }
         )
         .setColor('#00E5FF')
         .setFooter({ text: STORE_NAME })
         .setTimestamp();
-    if (amount) embed.addFields({ name: ' Amount', value: `${amount}`, inline: true });
-    if (note) embed.addFields({ name: ' Note', value: note, inline: true });
-    embed.addFields({
-        name: ' After Payment',
-        value: 'Reply with the **transaction ID (UTR/Txn No.)** here so staff can confirm your order instantly.'
-    });
-
-    // If we have the local scanner image, attach it as a file
-    if (hasLocalQr) {
-        return { embed, file: localQr };
-    }
-    return { embed, file: null };
+    if (amount) embed.addFields({ name: '💲 Amount', value: '₹' + amount, inline: true });
+    if (note) embed.addFields({ name: '📝 Note', value: note, inline: true });
+    embed.addFields({ name: '✅ After Payment', value: 'Reply with the **transaction ID (UTR/Txn No.)** here so staff can confirm your order instantly.' });
+    return hasLocalQr ? { embed, file: localQr } : { embed, file: null };
 }
 
 // ==================== LEVELING SYSTEM ====================
-function xpForLevel(level) {
-    return 100 * level; // XP needed to go from level N to N+1
-}
-
+function xpForLevel(level) { return 100 * level; }
 function levelFromXp(xp) {
-    let level = 0;
-    let remaining = xp;
-    while (remaining >= xpForLevel(level + 1)) {
-        remaining -= xpForLevel(level + 1);
-        level++;
-    }
+    let level = 0, remaining = xp;
+    while (remaining >= xpForLevel(level + 1)) { remaining -= xpForLevel(level + 1); level++; }
     return { level, currentXp: remaining, xpNeeded: xpForLevel(level + 1) };
 }
 
-// Grant XP to a user (rate-limited to once per 45s)
 async function grantXp(member) {
     if (!member || member.user.bot) return;
     const levels = loadData('levels.json');
     const user = levels[member.id] || { xp: 0, level: 0, lastMsg: 0 };
     const now = Date.now();
-    if (now - (user.lastMsg || 0) < 45000) return; // cooldown
+    if (now - (user.lastMsg || 0) < 45000) return;
     user.lastMsg = now;
-    user.xp += Math.floor(Math.random() * 8) + 4; // 4-11 XP per message
-
+    user.xp += Math.floor(Math.random() * 8) + 4;
     const before = user.level;
     const info = levelFromXp(user.xp);
     user.level = info.level;
     levels[member.id] = user;
     saveData('levels.json', levels);
-
-    // Level up!
     if (info.level > before) {
         const levelUpChannel = member.guild.channels.cache.find(c => c.name === 'level-up');
         const embed = new EmbedBuilder()
-            .setTitle(' Level Up!')
-            .setDescription(`**${member.user.tag}** reached **Level ${info.level}**!`)
+            .setTitle('🎉 Level Up!')
+            .setDescription('**' + member.user.tag + '** reached **Level ' + info.level + '**!')
             .setColor('#F1C40F')
             .setFooter({ text: STORE_NAME })
             .setTimestamp();
-        if (levelUpChannel) {
-            await levelUpChannel.send({ content: `Congrats <@${member.id}>! `, embeds: [embed] });
-        }
-
-        // Auto-assign level role
+        if (levelUpChannel) await levelUpChannel.send({ content: 'Congrats <@' + member.id + '>! 🎊', embeds: [embed] });
         const levelRoleMap = { 5: 'Lv 5', 10: 'Lv 10', 25: 'Lv 25', 50: 'Lv 50', 100: 'Lv 100' };
         for (const [lv, roleName] of Object.entries(levelRoleMap)) {
-            if (info.level >= parseInt(lv)) {
+            if (info.level >= parseInt(lv)) { 
                 const role = member.guild.roles.cache.find(r => r.name === roleName);
-                if (role && !member.roles.cache.has(role.id)) {
-                    await member.roles.add(role).catch(() => {});
-                }
+                if (role && !member.roles.cache.has(role.id)) await member.roles.add(role).catch(() => {}); 
             }
         }
     }
 }
 
-// Assign "Verified Buyer" role to a user who just vouched (or already has vouches)
 async function assignVerifiedBuyer(guild, userId) {
     try {
         const role = guild.roles.cache.find(r => r.name === 'Verified');
         if (!role) return;
         const member = await guild.members.fetch(userId).catch(() => null);
-        if (member && !member.roles.cache.has(role.id)) {
-            await member.roles.add(role);
-        }
-    } catch (e) { /* ignore */ }
+        if (member && !member.roles.cache.has(role.id)) await member.roles.add(role);
+    } catch (e) {}
 }
 
 // ==================== ANTI-SCAM PROTECTION ====================
@@ -207,8 +161,6 @@ const SCAM_PATTERNS = [
     /discord[.]gift(?:[^a-z]|$)/i,
     /(?:dicsord|dlscord|discorcl|discrod|disc0rd)[.]/i,
     /steamcommunity[.]com[^"]*free/i,
-    /(?:bit[.]ly|tinyurl[.]com|t[.]me[^a-z]{1,40})(?![a-z])/i,
-    /@everyone.{0,40}(?:free|giveaway|nitro|steam|paypal)/i,
     /(?:paypal|venmo)[^@]{0,20}@[a-z]+[.][a-z]{2,}/i,
     /[=][^ ]{12,}={1,2}$/i
 ];
@@ -217,32 +169,49 @@ const SCAM_WORDS = ['free nitro', 'nitro gift', 'discord gift', 'steam gift', 'n
 async function antiScamCheck(message) {
     const text = message.content;
     if (!text) return false;
-    // FIX: Skip #vouches channel - vouches mentioning "free" are legit
+    // Skip #vouches channel - vouches mentioning "free" are legit
     const vouchCh = message.guild?.channels?.cache?.find(c => c.name === 'vouches');
     if (vouchCh && message.channel.id === vouchCh.id) return false;
-    // FIX: Skip staff messages
+    // Skip staff messages
     if (message.member?.roles?.cache?.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name))) return false;
     // Mass mention spam - only if combined with scam words AND short message
-    if (message.mentions.everyone && text.length < 100) {
-        const hasScam = SCAM_WORDS.some(w => text.toLowerCase().includes(w));
-        if (hasScam) return true;
+    if (message.mentions.everyone && text.length < 100) { 
+        const hasScam = SCAM_WORDS.some(w => text.toLowerCase().includes(w)); 
+        if (hasScam) return true; 
     }
-    if (message.mentions.users.size > 10) {
-        const hasScam = SCAM_WORDS.some(w => text.toLowerCase().includes(w));
-        if (hasScam) return true;
+    if (message.mentions.users.size > 10) { 
+        const hasScam = SCAM_WORDS.some(w => text.toLowerCase().includes(w)); 
+        if (hasScam) return true; 
     }
-
-    for (const pat of SCAM_PATTERNS) {
-        if (pat.test(text)) {
-            return true;
-        }
-    }
-    for (const w of SCAM_WORDS) {
-        if (text.toLowerCase().includes(w)) {
-            return true;
-        }
-    }
+    for (const pat of SCAM_PATTERNS) { if (pat.test(text)) return true; }
+    for (const w of SCAM_WORDS) { if (text.toLowerCase().includes(w)) return true; }
     return false;
+}
+
+// ==================== REPLACE EMBED (IMPROVED) ====================
+async function replaceEmbed(channel, title, newEmbed, row) {
+    try {
+        const messages = await channel.messages.fetch({ limit: 100 });
+        // Only delete THIS bot's messages (not other bots)
+        const oldMessages = messages.filter(m => m.author.id === client.user.id && m.embeds.some(e => e.title === title));
+        if (oldMessages.size > 0) {
+            const newest = oldMessages.first();
+            const oldJson = JSON.stringify(newest.embeds[0]?.toJSON());
+            const newJson = JSON.stringify(newEmbed.toJSON());
+            if (oldJson === newJson && oldMessages.size <= 1) {
+                return; // content identical
+            }
+            // Delete individually to handle messages >14 days old
+            for (const [key, msg] of oldMessages) {
+                await msg.delete().catch(() => {});
+            }
+            console.log(`Refreshed embed in #${channel.name}: ${title}`);
+        }
+        await channel.send({ embeds: [newEmbed], components: row ? [row] : undefined });
+    } catch (e) {
+        // Fallback: just send if we can't read history
+        await channel.send({ embeds: [newEmbed], components: row ? [row] : undefined }).catch(() => {});
+    }
 }
 
 // ==================== GIVEAWAY ====================
@@ -253,43 +222,31 @@ async function endGiveaway(gId, guild, channel, msg) {
         if (!ga) return;
         delete giveaways[gId];
         saveData('giveaways.json', giveaways);
-
-        let entrants = ga.entrants || [];
-        // Re-collect from reactions/buttons
-        if (msg) {
-            try {
-                const fetched = await msg.fetch();
-                const reactions = fetched.reactions.cache.get('');
-                if (reactions) {
-                    const users = await reactions.users.fetch();
-                    entrants = users.filter(u => !u.bot).map(u => u.id);
-                }
-            } catch (e) { /* ignore */ }
-        }
-        entrants = [...new Set(entrants)];
-
+        // Use entrants array from JSON (button entries preserved)
+        let entrants = [...new Set(ga.entrants || [])];
         const winnerIds = [];
         const pool = [...entrants];
         for (let i = 0; i < Math.min(ga.winners, pool.length); i++) {
             const idx = Math.floor(Math.random() * pool.length);
             winnerIds.push(pool.splice(idx, 1)[0]);
         }
-
         const resultEmbed = new EmbedBuilder()
-            .setTitle(' Giveaway Ended!')
-            .setDescription(`**Prize:** ${ga.prize}`)
+            .setTitle('🎉 Giveaway Ended!')
+            .setDescription('**Prize:** ' + ga.prize)
             .setColor('#FF69B4')
             .setFooter({ text: STORE_NAME })
             .setTimestamp();
-
         if (winnerIds.length > 0) {
             resultEmbed.addFields({
-                name: ' Winners',
-                value: winnerIds.map(id => `<@${id}>`).join(', ')
+                name: '🏆 Winners',
+                value: winnerIds.map(id => '<@' + id + '>').join(', ')
             });
-            await channel.send({ content: winnerIds.map(id => `<@${id}>`).join(' ') + ' congratulations! ', embeds: [resultEmbed] });
+            await channel.send({ 
+                content: winnerIds.map(id => '<@' + id + '>').join(' ') + ' congratulations! 🎉', 
+                embeds: [resultEmbed] 
+            });
         } else {
-            resultEmbed.setDescription(`**Prize:** ${ga.prize}\n\nNo one entered. `);
+            resultEmbed.setDescription('**Prize:** ' + ga.prize + '/n/nNo one entered. 😢');
             await channel.send({ embeds: [resultEmbed] });
         }
     } catch (e) {
@@ -297,339 +254,130 @@ async function endGiveaway(gId, guild, channel, msg) {
     }
 }
 
-// Replace (or create) an embed with the given title in a channel.
-// - Deletes OLD bot-posted embeds with the same title (so new changes appear)
-// - NEVER deletes user messages (reps, orders, chats stay safe)
-// - Only sends if the embed content actually changed
-async function replaceEmbed(channel, title, newEmbed, row) {
-    try {
-        const messages = await channel.messages.fetch({ limit: 100 });
-        // FIX: Only delete THIS bot's messages (not other bots)
-        const oldMessages = messages.filter(m => m.author.id === client.user.id && m.embeds.some(e => e.title === title));
-        if (oldMessages.size > 0) {
-            const newest = oldMessages.first();
-            // FIX: Compare full embed JSON, not just description
-            const oldJson = JSON.stringify(newest.embeds[0]?.toJSON());
-            const newJson = JSON.stringify(newEmbed.toJSON());
-            if (oldJson === newJson && oldMessages.size <= 1) {
-                return; // content identical
-            }
-            // FIX: Delete individually to handle messages >14 days old
-            for (const [key, msg] of oldMessages) {
-                await msg.delete().catch(() => {});
-            }
-            console.log(`Refreshed embed in #${channel.name}: ${title}`);
-        }
-        await channel.send({ embeds: [newEmbed], components: row ? [row] : undefined });
-    } catch (e) {
-        // fallback: just send if we can't read history
-        await channel.send({ embeds: [newEmbed], components: row ? [row] : undefined }).catch(() => {});
-    }
-}
-
-let orderCounter = loadData('counter.json').orderCounter || 20;
-
-// FIX: Persistent order counter - always reads from disk and saves
-function getNextOrderNo() {
-    orderCounter++;
-    saveData('counter.json', { orderCounter });
-    return orderCounter;
-}
-
-// ==================== SERVER SETUP (Xero's Store layout) ====================
+// ==================== SERVER SETUP ====================
 async function setupServer(guild) {
-    console.log(`Setting up server: ${guild.name}`);
-    const guildId = guild.id;
-
-    // Track whether this server was already set up before.
-    // If yes, we NEVER re-create channels (so channels the owner
-    // deleted stay deleted). We only refresh permissions & messages.
+    console.log('Setting up: ' + guild.name);
     const setupState = loadData('setup-state.json');
-    const isFirstSetup = !setupState[guildId];
-    console.log(isFirstSetup ? 'First-time setup - creating channels...' : 'Re-setup - keeping existing channels, not re-creating deleted ones.');
 
-    // Create roles
-    const roles = [
-        { name: 'Owner', color: '#FF0000', permissions: [PermissionFlagsBits.Administrator] },
-        { name: 'Admin', color: '#FF5555', permissions: [PermissionFlagsBits.ManageGuild, PermissionFlagsBits.BanMembers, PermissionFlagsBits.KickMembers, PermissionFlagsBits.ManageMessages] },
-        { name: 'Staff', color: '#FF8800', permissions: [PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ModerateMembers] },
+    // Create roles (skip if exists)
+    const roleList = [
+        { name: 'Owner', color: '#FF0000', permissions: [PermissionBits.Flags.Administrator] },
+        { name: 'Admin', color: '#FF5555', permissions: [PermissionBits.Flags.ManageGuild, PermissionBits.Flags.BanMembers, PermissionBits.Flags.KickMembers, PermissionBits.Flags.ManageMessages] },
+        { name: 'Staff', color: '#FF8800', permissions: [PermissionBits.Flags.ManageMessages, PermissionBits.Flags.ModerateMembers] },
         { name: 'Seller', color: '#00C853', permissions: [] },
         { name: 'Buyer', color: '#0099FF', permissions: [] },
         { name: 'Verified', color: '#00E5FF', permissions: [] },
         { name: 'Trusted', color: '#FFD700', permissions: [] },
-        { name: 'Member', color: '#808080', permissions: [] },
-        { name: 'Lv 5', color: '#2ECC71', permissions: [] },
-        { name: 'Lv 10', color: '#3498DB', permissions: [] },
-        { name: 'Lv 25', color: '#9B59B6', permissions: [] },
-        { name: 'Lv 50', color: '#E91E63', permissions: [] },
-        { name: 'Lv 100', color: '#F1C40F', permissions: [] }
+        { name: 'Member', color: '#808080', permissions: [] }
     ];
-
-    const createdRoles = {};
-    for (const roleData of roles) {
-        const existing = guild.roles.cache.find(r => r.name === roleData.name);
-        if (existing) {
-            createdRoles[roleData.name] = existing;
-        } else {
-            const role = await guild.roles.create({
-                name: roleData.name,
-                color: roleData.color,
-                permissions: roleData.permissions,
-                reason: 'Xero Store setup'
-            });
-            createdRoles[roleData.name] = role;
+    for (const r of roleList) {
+        if (!guild.roles.cache.find(x => x.name === r.name)) {
+            await guild.roles.create({ name: r.name, color: r.color, permissions: r.permissions }).catch(() => {});
         }
     }
 
-    // Channel structure (from screenshot)
-    const structure = [
-        { category: ` ${STORE_NAME}  INFO`, channels: [
-            { name: 'announce', type: ChannelType.GuildText, topic: 'Important announcements' },
-            { name: 'rules', type: ChannelType.GuildText, topic: 'Read before buying!' },
-            { name: 'events', type: ChannelType.GuildText, topic: 'Events & giveaways' },
-            { name: 'giveaway', type: ChannelType.GuildText, topic: 'Giveaways' }
-        ]},
-        { category: ` ${STORE_NAME}  SHOPS`, channels: [
-            { name: 'restock', type: ChannelType.GuildText, topic: 'New stock drops' },
-            { name: 'restock-2', type: ChannelType.GuildText, topic: 'More stock' },
-            { name: 'game-acc', type: ChannelType.GuildText, topic: 'Game accounts' },
-            { name: 'pc-parts', type: ChannelType.GuildText, topic: 'PC parts & hardware' }
-        ]},
-        { category: ` ${STORE_NAME}  LEGITNESS`, channels: [
-            { name: 'proofs', type: ChannelType.GuildText, topic: 'Proof of past sales' },
-            { name: 'vouches', type: ChannelType.GuildText, topic: 'Customer vouches' },
-            { name: 'orders', type: ChannelType.GuildText, topic: 'Order confirmation log' }
-        ]},
-        { category: ` ${STORE_NAME}  MEMBERS`, channels: [
-            { name: 'general-chat', type: ChannelType.GuildText, topic: 'General discussion - feel free to chat here!' },
-            { name: 'welcome-back', type: ChannelType.GuildText, topic: 'Say hi to the community!' },
-            { name: 'introduce', type: ChannelType.GuildText, topic: 'Introduce yourself' },
-            { name: 'level-up', type: ChannelType.GuildText, topic: 'Level up discussion' },
-            { name: 'feedback', type: ChannelType.GuildText, topic: 'Give us feedback' },
-            { name: 'mirrors', type: ChannelType.GuildText, topic: 'Mirror links' },
-            { name: 'backups', type: ChannelType.GuildText, topic: 'Backup server links' }
-        ]},
-        { category: ` ${STORE_NAME}  SUPPORT`, channels: [
-            { name: 'create-ticket', type: ChannelType.GuildText, topic: 'Click the button to buy or get help' },
-            { name: 'ticket-logs', type: ChannelType.GuildText, topic: 'Ticket transcripts' }
-        ]},
-        { category: ` ${STORE_NAME}  VOICE`, channels: [
-            { name: 'General Voice', type: ChannelType.GuildVoice },
-            { name: 'Buyers Chat', type: ChannelType.GuildVoice }
-        ]}
-    ];
+    // Fetch fresh channels
+    await guild.channels.fetch().catch(() => {});
 
-    // ONLY create channels on first-time setup.
-    // FIX: Fetch fresh channels from Discord, skip existing ones
-    if (isFirstSetup) {
-        await guild.channels.fetch().catch(() => {});
-        for (const catData of structure) {
-            let category = guild.channels.cache.find(c => c.name === catData.category && c.type === ChannelType.GuildCategory);
-            if (!category) {
-                category = await guild.channels.create({
-                    name: catData.category,
-                    type: ChannelType.GuildCategory
-                });
-            }
-            for (const chData of catData.channels) {
-                const existing = guild.channels.cache.find(c => c.name === chData.name);
-                if (!existing) {
-                    await guild.channels.create({
-                        name: chData.name,
-                        type: chData.type,
-                        parent: category.id,
-                        topic: chData.topic || ''
-                    });
-                }
+    // Create categories + channels (skip existing)
+    const cats = [
+        { name: 'INFO', ch: ['announce', 'rules', 'events', 'giveaway'] },
+        { name: 'SHOPS', ch: ['restock', 'restock-2', 'game-acc', 'pc-parts'] },
+        { name: 'LEGITNESS', ch: ['proofs', 'vouches', 'orders'] },
+        { name: 'MEMBERS', ch: ['general-chat', 'welcome-back', 'introduce', 'level-up', 'feedback', 'mirrors', 'backups'] },
+        { name: 'SUPPORT', ch: ['create-ticket', 'ticket-logs'] }
+    ];
+    for (const cat of cats) {
+        let catObj = guild.channels.cache.find(c => c.name.includes(cat.name) && c.type === ChannelType.GuildCategory);
+        if (!catObj) {
+            catObj = await guild.channels.create({ name: STORE_NAME + ' ' + cat.name, type: ChannelType.GuildCategory }).catch(() => null);
+        }
+        if (!catObj) continue;
+        for (const chName of cat.ch) {
+            if (!guild.channels.cache.find(c => c.name === chName)) {
+                await guild.channels.create({ name: chName, type: ChannelType.GuildText, parent: catObj.id }).catch(() => {});
             }
         }
     }
 
-    // ===== READ-ONLY PERMISSIONS =====
-    // All channels are read-only for everyone EXCEPT:
-    //   - general-chat (open for chatting)
-    //   - vouches (needed for the auto-vouch system)
-    //   - voice channels (need to be able to talk)
-    // Staff/Admin roles keep full access everywhere.
-    const openChannels = new Set(['general-chat', 'vouches']);
-    const staffRole = guild.roles.cache.find(r => r.name === 'Admin') || guild.roles.cache.find(r => r.name === 'Owner');
-    const sellerRole = guild.roles.cache.find(r => r.name === 'Seller');
+    // Voice channels
+    let voiceCat = guild.channels.cache.find(c => c.name.includes('VOICE') && c.type === ChannelType.GuildCategory);
+    if (!voiceCat) voiceCat = await guild.channels.create({ name: STORE_NAME + ' VOICE', type: ChannelType.GuildCategory }).catch(() => null);
+    if (voiceCat) {
+        if (!guild.channels.cache.find(c => c.name === 'General Voice')) await guild.channels.create({ name: 'General Voice', type: ChannelType.GuildVoice, parent: voiceCat.id }).catch(() => {});
+        if (!guild.channels.cache.find(c => c.name === 'Buyers Chat')) await guild.channels.create({ name: 'Buyers Chat', type: ChannelType.GuildVoice, parent: voiceCat.id }).catch(() => {});
+    }
 
+    // Read-only permissions (except general-chat, vouches)
+    const openCh = new Set(['general-chat', 'vouches']);
+    const staff = guild.roles.cache.find(r => r.name === 'Admin');
     for (const ch of guild.channels.cache.values()) {
-        if (ch.type === ChannelType.GuildCategory) continue;
-        if (ch.type !== ChannelType.GuildText && ch.type !== ChannelType.GuildAnnouncement) continue;
-        if (ch.type === ChannelType.GuildVoice) continue;
-
-        // Skip channels that should stay open
-        if (openChannels.has(ch.name)) continue;
-        // Skip ticket channels (they have their own per-user permissions)
-        if (/^order-|^support-|^ticket-/.test(ch.name)) continue;
-
-        // Lock @everyone down to read-only
-        await ch.permissionOverwrites.edit(guild.id, {
-            SendMessages: false,
-            AddReactions: false,
-            CreatePublicThreads: false,
-            CreatePrivateThreads: false,
-            SendMessagesInThreads: false,
-            SendVoiceMessages: false,
-            UseApplicationCommands: true,
-            Connect: true
-        }, { reason: 'Read-only channel' });
-
-        // Give staff full send permissions
-        if (staffRole) {
-            await ch.permissionOverwrites.edit(staffRole.id, {
-                SendMessages: true,
-                AddReactions: true,
-                ManageMessages: true,
-                ManageChannels: true
-            }, { reason: 'Staff access' });
-        }
-        if (sellerRole && ['restock', 'restock-2', 'game-acc', 'pc-parts'].includes(ch.name)) {
-            await ch.permissionOverwrites.edit(sellerRole.id, {
-                SendMessages: true,
-                AddReactions: true
-            }, { reason: 'Seller access in shop channels' });
-        }
-    }
-    console.log('Read-only permissions applied (except general-chat & vouches).');
-
-    // Rules embed - clean point-wise with spacing
-    const rulesChannel = guild.channels.cache.find(c => c.name === 'rules');
-    if (rulesChannel) {
-        const rulesEmbed = new EmbedBuilder()
-            .setTitle(` ${STORE_NAME} - Server Rules`)
-            .setDescription(`> Welcome! Please read before buying. Keep it simple.\n\n` +
-                `**1  Be Respectful**\n> No harassment, hate speech, or toxicity. Treat others how you want to be treated.\n\n` +
-                `**2  No Scamming**\n> Scamming = **instant ban**. No warnings. We take this seriously.\n\n` +
-                `**3  Vouch After Purchase**\n> Got your product? Leave a vouch in #vouches to build trust.\n\n` +
-                `**4  Orders Only via Tickets**\n> All purchases go through **Place Order** in #create-ticket. No DMs.\n\n` +
-                `**5  Chat in General**\n> Most channels are **read-only**. Chat freely in #general-chat.\n\n` +
-                `**6  Proof for Sellers**\n> Sellers must show **proofs** in #proofs before listing products.\n\n` +
-                `**7  Follow Discord ToS**\n> Discord rules always apply. No loopholes.`)
-            .setColor('#FF5555')
-            .setFooter({ text: STORE_NAME })
-            .setTimestamp();
-        await replaceEmbed(rulesChannel, ` ${STORE_NAME} - Server Rules`, rulesEmbed);
-
-        // "How to Buy" embed - clean 5 steps with spacing
-        const ticketRef = `<#${guild.channels.cache.find(c => c.name === 'create-ticket')?.id || 'create-ticket'}>`;
-        const howToBuyEmbed = new EmbedBuilder()
-            .setTitle(` How to Buy - ${STORE_NAME}`)
-            .setDescription(`Getting your product is easy, just 5 steps:\n\n` +
-                `**Step 1**  Go to ${ticketRef}\n` +
-                `**Step 2**  Click the **"Place Order"** button\n` +
-                `**Step 3**  Fill in product name & quantity\n` +
-                `**Step 4**  Wait for staff confirmation\n` +
-                `**Step 5**  Receive product, then vouch in #vouches`)
-            .setColor('#00C853')
-            .setFooter({ text: STORE_NAME });
-        await replaceEmbed(rulesChannel, ` How to Buy - ${STORE_NAME}`, howToBuyEmbed);
+        if (ch.type === ChannelType.GuildCategory || ch.type === ChannelType.GuildVoice) continue;
+        if (openCh.has(ch.name) || /^order-|^support-|^ticket-/.test(ch.name)) continue;
+        await ch.permissionOverwrites.edit(guild.id, { SendMessages: false, AddReactions: false }).catch(() => {});
+        if (staff) await ch.permissionOverwrites.edit(staff.id, { SendMessages: true, AddReactions: true, ManageMessages: true }).catch(() => {});
     }
 
-    // Welcome channel
-    const welcomeChannel = guild.channels.cache.find(c => c.name === 'welcome-back');
-    if (welcomeChannel) {
-        const welcomeEmbed = new EmbedBuilder()
-            .setTitle(` Welcome to ${STORE_NAME}!`)
-            .setDescription(`Your trusted marketplace for Nitro, boosters, game accounts, and more!\n\n` +
-                `** Check our shops:**\n` +
-                ` <#${guild.channels.cache.find(c => c.name === 'restock')?.id || 'restock'}> - Latest stock\n` +
-                ` <#${guild.channels.cache.find(c => c.name === 'game-acc')?.id || 'game-acc'}> - Game accounts\n\n` +
-                `** Why trust us?**\n` +
-                `  Real customer vouches in <#${guild.channels.cache.find(c => c.name === 'vouches')?.id || 'vouches'}>\n` +
-                `  Every order logged in <#${guild.channels.cache.find(c => c.name === 'orders')?.id || 'orders'}>\n` +
-                `  Proofs in the LEGITNESS category\n\n` +
-                `** Chat with us in <#${guild.channels.cache.find(c => c.name === 'general-chat')?.id || 'general-chat'}>**\n` +
-                `** Need help?** Create a ticket!`)
-            .setImage('https://media.tenor.com/EWwYmIsWKroAAAAM/kaneki-tokyo-ghoul.gif')
-            .setColor('#00C853')
-            .setFooter({ text: STORE_NAME })
-            .setTimestamp();
-        await replaceEmbed(welcomeChannel, ` Welcome to ${STORE_NAME}!`, welcomeEmbed);
-    }
-
-    // Create order button in create-ticket
-    const ticketChannel = guild.channels.cache.find(c => c.name === 'create-ticket');
-    if (ticketChannel) {
-        const ticketEmbed = new EmbedBuilder()
-            .setTitle(` ${STORE_NAME} - Orders & Support`)
-            .setDescription(`Click a button below:\n\n` +
-                ` **Place Order** - Buy a product\n` +
-                ` **Support** - Get help with a problem`)
+    // Ticket embed
+    const ticketCh = guild.channels.cache.find(c => c.name === 'create-ticket');
+    if (ticketCh) {
+        try { 
+            const old = await ticketCh.messages.fetch({ limit: 50 }); 
+            for (const [, m] of old.filter(x => x.author.id === client.user.id)) await m.delete().catch(() => {}); 
+        } catch (e) {}
+        const embed = new EmbedBuilder()
+            .setTitle('Orders & Support')
+            .setDescription('Click a button below:/n/nPlace Order - Buy a product/n/nSupport - Get help with a problem')
             .setColor('#0099FF')
             .setFooter({ text: STORE_NAME });
-
-        const row = new ActionRowBuilder()
-            .addComponents(
-                new ButtonBuilder().setCustomId('place_order').setLabel('Place Order').setStyle(ButtonStyle.Success).setEmoji(''),
-                new ButtonBuilder().setCustomId('support_ticket').setLabel('Support').setStyle(ButtonStyle.Primary).setEmoji('')
-            );
-
-        await replaceEmbed(ticketChannel, ` ${STORE_NAME} - Orders & Support`, ticketEmbed, row);
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('place_order').setLabel('Place Order').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('support_ticket').setLabel('Support').setStyle(ButtonStyle.Primary)
+        );
+        await ticketCh.send({ embeds: [embed], components: [row] }).catch(() => {});
     }
 
-    // Orders channel
-    const ordersChannel = guild.channels.cache.find(c => c.name === 'orders');
-    if (ordersChannel) {
-        const ordersEmbed = new EmbedBuilder()
-            .setTitle(` ${STORE_NAME} Order Log`)
-            .setDescription('Confirmed orders will appear here.')
-            .setColor('#FF8800')
-            .setFooter({ text: STORE_NAME });
-        await replaceEmbed(ordersChannel, ` ${STORE_NAME} Order Log`, ordersEmbed);
-    }
-
-    // Vouches channel
-    const vouchesChannel = guild.channels.cache.find(c => c.name === 'vouches');
-    if (vouchesChannel) {
-        const vouchesEmbed = new EmbedBuilder()
-            .setTitle(` ${STORE_NAME} Vouches`)
-            .setDescription('Customer vouches after successful purchases.')
-            .setColor('#FFD700')
-            .setFooter({ text: STORE_NAME });
-        await replaceEmbed(vouchesChannel, ` ${STORE_NAME} Vouches`, vouchesEmbed);
-    }
-
-    // Record that this guild has been set up (so re-runs don't recreate deleted channels)
-    setupState[guildId] = Date.now();
+    setupState[guild.id] = Date.now();
     saveData('setup-state.json', setupState);
-
-    console.log('Server setup complete!');
-    return createdRoles;
+    console.log('Setup complete!');
 }
 
 // ==================== SLASH COMMANDS ====================
 const commands = [
     new SlashCommandBuilder()
         .setName('setup')
-        .setDescription('Setup the full server structure (Admin only)'),
+        .setDescription('Setup server (Admin only)'),
     new SlashCommandBuilder()
-        .setName('vouch')
-        .setDescription('Vouch for a user after successful purchase')
-        .addUserOption(o => o.setName('user').setDescription('User to vouch for').setRequired(true))
-        .addStringOption(o => o.setName('review').setDescription('Your review').setRequired(true))
-        .addStringOption(o => o.setName('product').setDescription('What did they buy?').setRequired(false)),
+        .setName('afk')
+        .setDescription('Set AFK status')
+        .addStringOption(o => o.setName('reason').setDescription('Why are you AFK?').setRequired(false)),
     new SlashCommandBuilder()
-        .setName('vouches')
-        .setDescription('Check a user vouches')
-        .addUserOption(o => o.setName('user').setDescription('User to check').setRequired(false)),
+        .setName('earnings')
+        .setDescription('View store earnings (Staff only)'),
+    new SlashCommandBuilder()
+        .setName('blacklist')
+        .setDescription('Blacklist a user from creating tickets (Staff only)')
+        .addUserOption(o => o.setName('user').setDescription('User to blacklist').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+    new SlashCommandBuilder()
+        .setName('unblacklist')
+        .setDescription('Remove user from blacklist')
+        .addUserOption(o => o.setName('user').setDescription('User to unblacklist').setRequired(true)),
     new SlashCommandBuilder()
         .setName('product')
-        .setDescription('Post a product (paste your full description)')
-        .addStringOption(o => o.setName('description').setDescription('Paste your full product listing (up to 4000 chars)').setRequired(true).setMaxLength(4000))
-        .addStringOption(o => o.setName('channel').setDescription('restock, game-acc, etc (default: restock)').setRequired(false)),
+        .setDescription('Post a product')
+        .addStringOption(o => o.setName('description').setDescription('Full product listing').setRequired(true).setMaxLength(4000))
+        .addStringOption(o => o.setName('channel').setDescription('restock, game-acc, etc').setRequired(false)),
     new SlashCommandBuilder()
         .setName('stock')
-        .setDescription('List all products in the shop'),
+        .setDescription('View all products'),
     new SlashCommandBuilder()
         .setName('orders')
-        .setDescription('Check your order status (Buyer)'),
+        .setDescription('Check your orders'),
     new SlashCommandBuilder()
         .setName('confirm')
-        .setDescription('Confirm an order and mark as complete (Staff)')
-        .addIntegerOption(o => o.setName('orderno').setDescription('Order number').setRequired(true)),
+        .setDescription('Confirm order (Staff)')
+        .addIntegerOption(o => o.setName('orderno').setDescription('Order number').required(true)),
     new SlashCommandBuilder()
         .setName('help')
         .setDescription('Show all commands'),
@@ -638,67 +386,60 @@ const commands = [
         .setDescription('Show store stats'),
     new SlashCommandBuilder()
         .setName('upi')
-        .setDescription('Show your UPI scanner with amount')
-        .addIntegerOption(o => o.setName('amount').setDescription('Amount in  e.g. 400').setRequired(true)),
+        .setDescription('Show UPI scanner')
+        .addIntegerOption(o => o.setName('amount').setDescription('Amount in ₹').required(true)),
     new SlashCommandBuilder()
         .setName('announcement')
         .setDescription('Send announcement (Staff only)')
         .addChannelOption(o => o.setName('channel').setDescription('Target channel (default: announce)').setRequired(false)),
     new SlashCommandBuilder()
         .setName('giveaway')
-        .setDescription('Start a giveaway (Staff only)')
-        .addStringOption(o => o.setName('prize').setDescription('What is being given away').setRequired(true))
-        .addIntegerOption(o => o.setName('hours').setDescription('Duration in hours').setRequired(true))
-        .addIntegerOption(o => o.setName('winners').setDescription('Number of winners (default 1)').setRequired(false)),
+        .setDescription('Start giveaway (Staff only)')
+        .addStringOption(o => o.setName('prize').setDescription('Prize').required(true))
+        .addIntegerOption(o => o.setName('hours').setDescription('Duration in hours').required(true))
+        .addIntegerOption(o => o.setName('winners').setDescription('Number of winners').required(false)),
     new SlashCommandBuilder()
         .setName('setupi')
-        .setDescription('Set your UPI ID for payments (Staff only)')
-        .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID e.g. name@okhdfcbank').setRequired(true))
-        .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false)),
+        .setDescription('Set UPI ID (Staff only)')
+        .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID').required(true))
+        .addStringOption(o => o.setName('name').setDescription('Payee name').required(false)),
     new SlashCommandBuilder()
         .setName('lock')
-        .setDescription('Lock a channel')
-        .addChannelOption(o => o.setName('channel').setDescription('Channel to lock').setRequired(false)),
+        .setDescription('Lock channel')
+        .addChannelOption(o => o.setName('channel').setDescription('Channel').required(false)),
     new SlashCommandBuilder()
         .setName('unlock')
-        .setDescription('Unlock a channel')
-        .addChannelOption(o => o.setName('channel').setDescription('Channel to unlock').setRequired(false)),
+        .setDescription('Unlock channel')
+        .addChannelOption(o => o.setName('channel').setDescription('Channel').required(false)),
     new SlashCommandBuilder()
         .setName('slowmode')
-        .setDescription('Set slowmode on a channel')
-        .addIntegerOption(o => o.setName('seconds').setDescription('Slowmode delay (0 to disable)').setRequired(true))
-        .addChannelOption(o => o.setName('channel').setDescription('Channel to set slowmode').setRequired(false)),
+        .setDescription('Set slowmode')
+        .addIntegerOption(o => o.setName('seconds').setDescription('Delay (0 to disable)').required(true))
+        .addChannelOption(o => o.setName('channel').setDescription('Channel').required(false)),
     new SlashCommandBuilder()
         .setName('kick')
-        .setDescription('Kick a member')
-        .addUserOption(o => o.setName('user').setDescription('User to kick').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+        .setDescription('Kick member')
+        .addUserOption(o => o.setName('user').setDescription('User').required(true))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').required(false)),
     new SlashCommandBuilder()
         .setName('ban')
-        .setDescription('Ban a member')
-        .addUserOption(o => o.setName('user').setDescription('User to ban').setRequired(true))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+        .setDescription('Ban member')
+        .addUserOption(o => o.setName('user').setDescription('User').required(true))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').required(false)),
     new SlashCommandBuilder()
         .setName('mute')
-        .setDescription('Timeout a member')
-        .addUserOption(o => o.setName('user').setDescription('User to mute').setRequired(true))
-        .addIntegerOption(o => o.setName('minutes').setDescription('Duration in minutes (default 10)').setRequired(false))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
+        .setDescription('Timeout member')
+        .addUserOption(o => o.setName('user').setDescription('User').required(true))
+        .addIntegerOption(o => o.setName('minutes').setDescription('Duration').required(false))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').required(false)),
     new SlashCommandBuilder()
         .setName('unmute')
-        .setDescription('Remove timeout from a member')
-        .addUserOption(o => o.setName('user').setDescription('User to unmute').setRequired(true)),
-    new SlashCommandBuilder()
-        .setName('renumber')
-        .setDescription('Renumber all orders sequentially by date (Owner only)'),
+        .setDescription('Remove timeout')
+        .addUserOption(o => o.setName('user').setDescription('User').required(true)),
     new SlashCommandBuilder()
         .setName('purge')
-        .setDescription('Bulk delete messages')
-        .addIntegerOption(o => o.setName('count').setDescription('Number of messages to delete (max 100)').setRequired(true)),
-    new SlashCommandBuilder().setName('afk').setDescription('Set AFK status').addStringOption(o => o.setName('reason').setDescription('Why are you AFK?').setRequired(false)),
-    new SlashCommandBuilder().setName('earnings').setDescription('View store earnings (Staff only)'),
-    new SlashCommandBuilder().setName('blacklist').setDescription('Blacklist a user (Staff only)').addUserOption(o => o.setName('user').setDescription('User').setRequired(true)).addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
-    new SlashCommandBuilder().setName('unblacklist').setDescription('Remove from blacklist').addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
+        .setDescription('Bulk delete')
+        .addIntegerOption(o => o.setName('count').setDescription('Count (max 100)').required(true))
 ];
 
 async function registerCommands(guild) {
@@ -717,930 +458,810 @@ async function registerCommands(guild) {
     }
 }
 
-// ==================== EVENT HANDLERS ====================
-
+// ==================== READY ====================
 client.on('ready', async () => {
-    console.log(` Logged in as ${client.user.tag}`);
-    console.log(` Servers: ${client.guilds.cache.size}`);
-
+    console.log(`Logged in as ${client.user.tag}`);
+    console.log(`Servers: ${client.guilds.cache.size}`);
+    
     // Register commands on all guilds
     for (const guild of client.guilds.cache.values()) {
         await registerCommands(guild);
     }
-
+    
     // Auto-assign Verified Buyer role to anyone who has vouches
-    // FIX: Loop through ALL guilds, not just the last one
     const vouchData = loadData('vouches.json');
     for (const [userId, data] of Object.entries(vouchData)) {
-        if (data.reviews && data.reviews.length > 0) {
-            for (const g of client.guilds.cache.values()) {
-                try {
-                    const member = await g.members.fetch(userId);
-                    if (member) {
-                        const verifiedRole = g.roles.cache.find(r => r.name === 'Verified');
-                        if (verifiedRole && !member.roles.cache.has(verifiedRole.id)) {
-                            await member.roles.add(verifiedRole);
-                            console.log('Assigned Verified role to ' + member.user.tag);
-                        }
+        if (!data.reviews || data.reviews.length === 0) continue;
+        for (const g of client.guilds.cache.values()) {
+            try {
+                const member = await g.members.fetch(userId);
+                if (member) {
+                    const verifiedRole = g.roles.cache.find(r => r.name === 'Verified');
+                    if (verifiedRole && !member.roles.cache.has(verifiedRole.id)) { 
+                        await member.roles.add(verifiedRole); 
+                        console.log('Assigned Verified to ' + member.user.tag);
                     }
-                } catch (e) { /* user left or not found */ }
-            }
+                }
+            } catch (e) {}
         }
     }
-
-    client.user.setActivity(`${STORE_NAME} | /help`, { type: 'Watching' });
+    
+    client.user.setActivity(STORE_NAME + ' | /help', { type: 'Watching' });
 });
 
-// Slash command handler
+// ==================== SLASH COMMANDS HANDLER ====================
 client.on('interactionCreate', async (interaction) => {
     if (!interaction.isCommand()) return;
     const { commandName } = interaction;
-
-    // Only /upi works in DMs; everything else needs a server
-    if (!interaction.inGuild() && commandName !== 'upi') {
-        return interaction.reply({ content: ' This command only works inside the server. Try `/upi` for payments!', ephemeral: true });
-    }
-
+    if (!interaction.inGuild() && commandName !== 'upi') return interaction.reply({ content: '❌ Server only!', ephemeral: true });
     try {
         switch (commandName) {
             case 'setup': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.reply({ content: ' Admin only!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.Administrator)) {
+                    return interaction.reply({ content: '❌ You need Administrator permission!', ephemeral: true });
                 }
                 await interaction.deferReply({ ephemeral: true });
                 try {
                     await setupServer(interaction.guild);
                     await registerCommands(interaction.guild);
-                    await interaction.editReply({ content: ' Setup complete!' });
+                    await interaction.editReply({ content: '✅ Server setup complete!' });
                 } catch (e) {
                     console.error('Setup error:', e);
-                    await interaction.editReply({ content: ' Setup done with errors.' }).catch(() => {});
+                    await interaction.editReply({ content: '⚠️ Setup completed with some errors.' }).catch(() => {});
                 }
                 break;
             }
-
-            case 'vouch': {
-                const target = interaction.options.getUser('user');
-                const review = interaction.options.getString('review');
-                const product = interaction.options.getString('product') || 'Unknown product';
-
-                const vouches = loadData('vouches.json');
-                if (!vouches[target.id]) vouches[target.id] = { count: 0, reviews: [] };
-                vouches[target.id].count++;
-                vouches[target.id].reviews.push({
-                    from: interaction.user.id,
-                    fromTag: interaction.user.tag,
-                    product,
-                    review,
-                    date: new Date().toISOString()
+            case 'afk': {
+                const afkData = loadData('afk.json');
+                const afkReason = interaction.options.getString('reason') || 'AFK';
+                afkData[interaction.user.id] = {
+                    reason: afkReason,
+                    setAt: Date.now(),
+                    setAtIso: new Date().toISOString()
+                };
+                saveData('afk.json', afkData);
+                await interaction.reply({ content: '✅ You are now AFK: **' + afkReason + '**', ephemeral: true });
+                break;
+            }
+            case 'earnings': {
+                const isStaffEarn = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
+                    interaction.member.permissions.has(PermissionBits.Flags.Administrator);
+                if (!isStaffEarn) return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
+                
+                const orders = loadData('orders.json');
+                const allOrders = Object.values(orders);
+                const completed = allOrders.filter(o => o.status && o.status.includes('Completed'));
+                const pending = allOrders.filter(o => o.status && o.status.includes('Pending'));
+                
+                let totalRevenue = 0;
+                completed.forEach(o => {
+                    if (o.price && o.price !== 'TBD' && o.price !== 'N/A') {
+                        const num = parseFloat(String(o.price).replace(/[^0-9.]/g, ''));
+                        if (!isNaN(num)) totalRevenue += num;
+                    }
                 });
-                saveData('vouches.json', vouches);
-                await assignVerifiedBuyer(interaction.guild, interaction.user.id);
-
+                
+                const today = new Date().toDateString();
+                const todayOrders = completed.filter(o => {
+                    if (!o.completedAt && !o.createdAt) return false;
+                    return new Date(o.completedAt || o.createdAt).toDateString() === today;
+                });
+                
+                const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+                const weekOrders = completed.filter(o => {
+                    const d = new Date(o.completedAt || o.createdAt).getTime();
+                    return d > weekAgo;
+                });
+                
+                const productCount = {};
+                completed.forEach(o => {
+                    const p = o.product || 'Unknown';
+                    productCount[p] = (productCount[p] || 0) + 1;
+                });
+                const topProducts = Object.entries(productCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
+                
                 const embed = new EmbedBuilder()
-                    .setTitle(' New Vouch!')
-                    .setDescription(`**${interaction.user.tag}** vouched for **${target.tag}**`)
-                    .addFields(
-                        { name: ' Product', value: product },
-                        { name: ' Review', value: review },
-                        { name: 'Total Vouches', value: `${vouches[target.id].count}` }
-                    )
-                    .setColor('#FFD700')
+                    .setTitle('📊 ' + STORE_NAME + ' Earnings')
+                    .setColor('#00E5FF')
                     .setFooter({ text: STORE_NAME })
-                    .setTimestamp();
-
-                const vouchChannel = interaction.guild.channels.cache.find(c => c.name === 'vouches');
-                if (vouchChannel) {
-                    await vouchChannel.send({ embeds: [embed] });
-                }
-
-                // AUTOMATICALLY post "Order Completed" in #orders when vouched
-                // FIX: Use orderCounter and save to orders.json (no phantom orders)
-                const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
-                if (ordersChannel) {
-                    const orderNo = getNextOrderNo();
-                    // Save order to orders.json
-                    const orders = loadData('orders.json');
-                    const orderId = 'vouch_' + orderNo;
-                    orders[orderId] = {
-                        orderNo,
-                        product,
-                        quantity: 1,
-                        buyer: interaction.user.id,
-                        seller: target.id,
-                        status: ' Completed',
-                        source: 'slash-vouch',
-                        vouched: true,
-                        createdAt: new Date().toISOString()
-                    };
-                    saveData('orders.json', orders);
-                    const completeEmbed = new EmbedBuilder()
-                        .setTitle(' ORDER #' + orderNo)
-                        .setDescription('**Buyer:** ' + interaction.user.tag + '/n**Seller:** ' + target.tag + '/n**Product:** ' + product)
-                        .addFields(
-                            { name: ' Vouch', value: review },
-                            { name: ' Completed', value: '<t:' + Math.floor(Date.now() / 1000) + ':R>' }
-                        )
-                        .setColor('#00C853')
-                        .setFooter({ text: `${STORE_NAME}  Order #${orderNo}` })
-                        .setTimestamp();
-                    const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-                    await orderMsg.react('').catch(() => {});
-                }
-
-                await interaction.reply({ content: ` Vouched for ${target.tag}! Your vouch was logged in #vouches and #orders.`, ephemeral: true });
-                break;
-            }
-
-            case 'vouches': {
-                const target = interaction.options.getUser('user') || interaction.user;
-                const vouches = loadData('vouches.json');
-                const uv = vouches[target.id] || { count: 0, reviews: [] };
-
-                const embed = new EmbedBuilder()
-                    .setTitle(` Vouches for ${target.tag}`)
-                    .setDescription(`**Total: ${uv.count}**`)
-                    .setColor('#FFD700')
-                    .setFooter({ text: STORE_NAME });
-
-                if (uv.reviews.length > 0) {
-                    uv.reviews.slice(-5).reverse().forEach(r => {
-                        embed.addFields({ name: `By ${r.fromTag} (${r.product})`, value: `_${r.review}_  ${new Date(r.date).toLocaleDateString()}` });
+                    .setTimestamp()
+                    .addFields(
+                        { name: '💰 Total Revenue', value: '₹' + totalRevenue.toFixed(2), inline: true },
+                        { name: '✅ Completed', value: '' + completed.length, inline: true },
+                        { name: '⏳ Pending', value: '' + pending.length, inline: true },
+                        { name: '📅 Today', value: '' + todayOrders.length + ' orders', inline: true },
+                        { name: '📆 This Week', value: '' + weekOrders.length + ' orders', inline: true },
+                        { name: '🛒 Total Orders', value: '' + allOrders.length, inline: true }
+                    );
+                
+                if (topProducts.length > 0) {
+                    embed.addFields({
+                        name: '🏆 Top Products',
+                        value: topProducts.map(([name, count], i) => (i + 1) + '. ' + name.slice(0, 25) + ' (' + count + ' sales)').join('/n')
                     });
                 }
+                
                 await interaction.reply({ embeds: [embed], ephemeral: true });
                 break;
             }
-
+            case 'blacklist': {
+                const isStaffBl = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
+                    interaction.member.permissions.has(PermissionBits.Flags.Administrator);
+                if (!isStaffBl) return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
+                
+                const blTarget = interaction.options.getUser('user');
+                const blReason = interaction.options.getString('reason') || 'No reason';
+                const blacklist = loadData('blacklist.json');
+                
+                if (blacklist[blTarget.id]) {
+                    return interaction.reply({ content: '❝ ' + blTarget.tag + ' is already blacklisted!', ephemeral: true });
+                }
+                
+                blacklist[blTarget.id] = {
+                    tag: blTarget.tag,
+                    reason: blReason,
+                    blacklistedBy: interaction.user.id,
+                    blacklistedAt: new Date().toISOString()
+                };
+                saveData('blacklist.json', blacklist);
+                await interaction.reply({ content: '🚫 **' + blTarget.tag + '** blacklisted./nReason: ' + blReason, ephemeral: true });
+                break;
+            }
+            
+            case 'unblacklist': {
+                const isStaffUbl = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
+                    interaction.member.permissions.has(PermissionBits.Flags.Administrator);
+                if (!isStaffUbl) return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
+                
+                const ublTarget = interaction.options.getUser('user');
+                const blacklist = loadData('blacklist.json');
+                
+                if (!blacklist[ublTarget.id]) {
+                    return interaction.reply({ content: '❝ ' + ublTarget.tag + ' is not blacklisted.', ephemeral: true });
+                }
+                
+                delete blacklist[ublTarget.id];
+                saveData('blacklist.json', blacklist);
+                await interaction.reply({ content: '✅ **' + ublTarget.tag + '** removed from blacklist.', ephemeral: true });
+                break;
+            }
+            
             case 'product': {
                 if (!interaction.member.roles.cache.find(r => ['Seller', 'Admin', 'Owner', 'Staff'].includes(r.name))) {
-                    return interaction.reply({ content: ' You need the Seller role to add products!', ephemeral: true });
+                    return interaction.reply({ content: '❝ You need the Seller role to add products!', ephemeral: true });
                 }
                 const channelName = interaction.options.getString('channel') || interaction.channel?.name || 'restock';
-
+                
                 const modal = new ModalBuilder()
                     .setCustomId('product_modal_' + channelName)
                     .setTitle('Post Product');
-
-                const descInput = new TextInputBuilder()
-                    .setCustomId('product_desc')
-                    .setLabel('Paste your product listing')
-                    .setStyle(TextInputStyle.Paragraph)
-                    .setPlaceholder('Paste your full formatted product text here...')
-                    .setRequired(true)
-                    .setMaxLength(4000);
-
-                modal.addComponents(new ActionRowBuilder().addComponents(descInput));
+                
+                modal.addComponents(new ActionRowBuilder().addComponents(
+                    new TextInputBuilder().setCustomId('product_desc')
+                        .setLabel('Paste your product listing')
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setPlaceholder('Paste your full formatted product text here...')
+                        .setRequired(true)
+                        .setMaxLength(4000)
+                ));
+                
                 await interaction.showModal(modal);
                 break;
             }
-
+            
             case 'stock': {
                 const products = loadData('products.json');
                 const list = Object.entries(products);
                 if (list.length === 0) return interaction.reply({ content: 'No products listed yet.', ephemeral: true });
-
+                
                 const embed = new EmbedBuilder()
-                    .setTitle(` ${STORE_NAME} Stock`)
+                    .setTitle('🛒 ' + STORE_NAME + ' Stock')
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME });
-
+                
                 list.forEach(([id, p]) => {
-                    embed.addFields({ name: `${p.name} - ${p.price}`, value: `${p.description}\nSeller: <@${p.seller}>`, inline: false });
+                    embed.addFields({ 
+                        name: `${p.name || 'Product'} - ${p.price || ''}`, 
+                        value: `${p.description || '').slice(0, 100)}/nSeller: <@${p.seller}>`, 
+                        inline: false 
+                    });
                 });
+                
                 await interaction.reply({ embeds: [embed], ephemeral: true });
                 break;
             }
-
+            
             case 'orders': {
                 const orders = loadData('orders.json');
                 const userOrders = Object.values(orders).filter(o => o.buyer === interaction.user.id);
                 if (userOrders.length === 0) return interaction.reply({ content: 'You have no orders yet.', ephemeral: true });
-
+                
                 const embed = new EmbedBuilder()
-                    .setTitle(` Your Orders`)
+                    .setTitle('🧾 Your Orders')
                     .setColor('#FF8800')
                     .setFooter({ text: STORE_NAME });
-
-                userOrders.slice(-5).reverse().forEach(o => {
+                
+                userOrders.slice(5).reverse().forEach(o => {
                     embed.addFields({
                         name: `Order #${o.orderNo} - ${o.status}`,
-                        value: `${o.product} x${o.quantity}\nPrice: ${o.price || 'TBD'}`
+                        value: `${o.product} x${o.quantity}/nPrice: ${o.price || 'TBD'}`
                     });
                 });
+                
                 await interaction.reply({ embeds: [embed], ephemeral: true });
                 break;
             }
-
+            
             case 'confirm': {
                 if (!interaction.member.roles.cache.find(r => ['Owner', 'Admin', 'Staff', 'Seller'].includes(r.name))) {
-                    return interaction.reply({ content: ' Staff only!', ephemeral: true });
+                    return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
                 }
                 const orderNo = interaction.options.getInteger('orderno');
                 const orders = loadData('orders.json');
                 const order = Object.values(orders).find(o => o.orderNo === orderNo);
-                if (!order) return interaction.reply({ content: ' Order not found!', ephemeral: true });
-
-                order.status = ' Completed';
+                if (!order) return interaction.reply({ content: '❝ Order not found!', ephemeral: true });
+                
+                order.status = '✅ Completed';
                 order.confirmedBy = interaction.user.id;
                 order.confirmedAt = new Date().toISOString();
                 saveData('orders.json', orders);
-
-                // Post to orders channel
+                
                 const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
                 if (ordersChannel) {
                     const embed = new EmbedBuilder()
-                        .setTitle(` Order Confirmed`)
-                        .setDescription(`**Order No:** ${order.orderNo}\n**Product:** ${order.product}\n**Quantity:** ${order.quantity}\n**Buyer:** <@${order.buyer}>`)
+                        .setTitle('✅ Order Confirmed')
+                        .setDescription('**Order No:** ' + order.orderNo + '/n**Product:** ' + order.product + '/n**Quantity:** ' + (order.quantity || 1) + '/n**Buyer:** <@' + order.buyer + '>')
                         .setColor('#00C853')
                         .setFooter({ text: STORE_NAME })
                         .setTimestamp();
                     await ordersChannel.send({ embeds: [embed] });
                 }
-
-                await interaction.reply({ content: ` Order #${orderNo} confirmed!`, ephemeral: true });
+                
+                await interaction.reply({ content: '✅ Order #' + orderNo + ' confirmed!', ephemeral: true });
                 break;
             }
-
+            
             case 'help': {
                 const embed = new EmbedBuilder()
-                    .setTitle(` ${STORE_NAME} Commands`)
+                    .setTitle('📚 ' + STORE_NAME + ' Commands')
                     .setColor('#0099FF')
                     .addFields(
                         { name: '/setup', value: 'Setup server (Admin)' },
-                        { name: '/vouch @user review', value: 'Vouch after purchase' },
-                        { name: '/vouches', value: 'Check vouches' },
+                        { name: '/afk', value: 'Set AFK status' },
+                        { name: '/earnings', value: 'View earnings (Staff only)' },
+                        { name: '/blacklist', value: 'Blacklist a user (Staff only)' },
+                        { name: '/unblacklist', value: 'Remove from blacklist' },
                         { name: '/product', value: 'Add product (Seller)' },
                         { name: '/stock', value: 'View all products' },
                         { name: '/orders', value: 'Check your orders' },
                         { name: '/confirm <orderno>', value: 'Confirm order (Staff)' },
-                        { name: '/announcement', value: 'Send announcement (Staff)' },
-                        { name: '/renumber', value: 'Fix order numbers (Owner)' },
-                        { name: '/earnings', value: 'View earnings (Staff)' },
-                        { name: '/afk', value: 'Set AFK status' },
-                        { name: '/blacklist', value: 'Blacklist scammer (Staff)' },
-                        { name: '/help', value: 'Show this menu' }
+                        { name: '/help', value: 'Show this menu' },
+                        { name: '/stats', value: 'Show store stats' },
+                        { name: '/stats', value: 'Show store stats' },
+                        { name: '/upi', value: 'Show UPI scanner' },
+                        { name: '/announcement', value: 'Send announcement (Staff only)' },
+                        { name: '/giveaway', value: 'Start giveaway (Staff only)' },
+                        { name: '/setupi', value: 'Set UPI ID (Staff only)' },
+                        { name: '/lock', value: 'Lock channel' },
+                        { name: '/unlock', value: 'Unlock channel' },
+                        { name: '/slowmode', value: 'Set slowmode' },
+                        { name: '/kick', value: 'Kick member' },
+                        { name: '/ban', value: 'Ban member' },
+                        { name: '/mute', value: 'Timeout member' },
+                        { name: '/unmute', value: 'Remove timeout' },
+                        { name: '/purge', value: 'Bulk delete' }
                     )
                     .setFooter({ text: STORE_NAME });
                 await interaction.reply({ embeds: [embed], ephemeral: true });
                 break;
             }
-
+            
             case 'stats': {
                 const vouches = loadData('vouches.json');
                 const orders = loadData('orders.json');
                 const products = loadData('products.json');
-                const totalVouches = Object.values(vouches).reduce((a, b) => a + b.count, 0);
-                const totalOrders = Object.keys(orders).length;
-
+                const totalVouches = Object.values(vouches).reduce((a, b) => a + (b.count || 0), 0);
                 const embed = new EmbedBuilder()
-                    .setTitle(` ${STORE_NAME} Stats`)
+                    .setTitle('📊 ' + STORE_NAME + ' Stats')
                     .addFields(
-                        { name: ' Products', value: `${Object.keys(products).length}`, inline: true },
-                        { name: ' Orders', value: `${totalOrders}`, inline: true },
-                        { name: ' Vouches', value: `${totalVouches}`, inline: true },
-                        { name: ' Members', value: `${interaction.guild.memberCount}`, inline: true }
+                        { name: '🛒 Products', value: '' + Object.keys(products).length, inline: true },
+                        { name: '🧾 Orders', value: '' + Object.keys(orders).length, inline: true },
+                        { name: '⭐ Vouches', value: '' + totalVouches, inline: true },
+                        { name: '👥 Members', value: '' + interaction.guild.memberCount, inline: true }
                     )
                     .setColor('#00E5FF')
                     .setFooter({ text: STORE_NAME });
                 await interaction.reply({ embeds: [embed], ephemeral: true });
                 break;
             }
-
+            
             case 'upi': {
-                // Just /upi 400 - shows your scanner with 400
                 const amount = String(interaction.options.getInteger('amount'));
-
-                // Auto-fill note from order ticket
                 let autoNote = null;
-                const channelName = interaction.channel?.name || '';
-                if (/^order-/.test(channelName)) {
-                    autoNote = 'Order ' + channelName.replace('order-', '#');
+                if (/^order-/.test(interaction.channel?.name || '')) {
+                    autoNote = 'Order ' + interaction.channel.name.replace('order-', '#');
                 }
-
+                
                 const { embed, file } = await upiEmbed(config.upiId, amount, config.upiName, autoNote);
                 const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
                 await interaction.reply(payload);
                 break;
             }
-
-            case 'announcement': {
-                const isStaffAnn = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
-                    interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
-                if (!isStaffAnn) {
-                    return interaction.reply({ content: ' Staff only!', ephemeral: true });
-                }
-                const annModal = new ModalBuilder()
-                    .setCustomId('announcement_modal')
-                    .setTitle(' Send Announcement');
-                annModal.addComponents(
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_title').setLabel('Title').setStyle(TextInputStyle.Short).setPlaceholder('Important Update').setRequired(true)),
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_body').setLabel('Message').setStyle(TextInputStyle.Paragraph).setPlaceholder('Your announcement text here...').setRequired(true).setMaxLength(4000)),
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_color').setLabel('Color hex (without #)').setStyle(TextInputStyle.Short).setPlaceholder('FF5555').setRequired(false)),
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_ping').setLabel('Ping (everyone/here/none)').setStyle(TextInputStyle.Short).setPlaceholder('none').setRequired(false))
-                );
-                await interaction.showModal(annModal);
-                break;
-            }
-
+            
             case 'setupi': {
-                const isStaff = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
-                    interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
-                if (!isStaff) {
-                    return interaction.reply({ content: ' Staff only!', ephemeral: true });
+                if (!interaction.member?.roles?.cache?.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name))) {
+                    return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
                 }
                 config.upiId = interaction.options.getString('upiid');
                 if (interaction.options.getString('name')) config.upiName = interaction.options.getString('name');
                 try {
-                    const fsMod = require('fs');
                     const cfgPath = path.join(__dirname, 'config.json');
                     let cfg = {};
-                    try { cfg = JSON.parse(fsMod.readFileSync(cfgPath, 'utf8')); } catch (e) {}
+                    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch (e) {}
                     cfg.upiId = config.upiId;
                     cfg.upiName = config.upiName;
-                    fsMod.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-                    await interaction.reply({ content: ' UPI ID set to **' + config.upiId + '**! Payments now work.', ephemeral: true });
+                    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+                    await interaction.reply({ content: '✅ UPI ID set to **' + config.upiId + '**!', ephemeral: true });
                 } catch (e) {
-                    await interaction.reply({ content: ' UPI ID set for this session: **' + config.upiId + '** (could not save to config.json)', ephemeral: true });
+                    await interaction.reply({ content: '✅ UPI ID set for this session: **' + config.upiId + '** (could not save to config.json)', ephemeral: true });
                 }
                 break;
             }
-
+            
             case 'giveaway': {
-                const isStaff = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
-                    interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
-                if (!isStaff) {
-                    return interaction.reply({ content: ' Staff only!', ephemeral: true });
+                if (!interaction.member?.roles?.cache?.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name))) {
+                    return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
                 }
                 const prize = interaction.options.getString('prize');
                 const hours = interaction.options.getInteger('hours');
                 const winners = interaction.options.getInteger('winners') || 1;
                 const endTime = Date.now() + hours * 3600000;
-
+                
                 const giveawayEmbed = new EmbedBuilder()
-                    .setTitle(' GIVEAWAY!')
-                    .setDescription(`**Prize:** ${prize}\n\n` +
-                        `Click the ** Enter** button below to join!\n` +
-                        `**Winners:** ${winners}\n` +
-                        `**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
+                    .setTitle('🎉 GIVEAWAY!')
+                    .setDescription('**Prize:** ' + prize + '/n/nClick the **🎉 Enter** button below to join!/n**Winners:** ' + winners + '/n**Ends:** <t:' + Math.floor(endTime / 1000) + ':R>')
                     .setColor('#FF69B4')
                     .setFooter({ text: STORE_NAME })
                     .setTimestamp();
-
+                
                 const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('enter_giveaway').setLabel(' Enter').setStyle(ButtonStyle.Success)
+                    new ButtonBuilder().setCustomId('enter_giveaway').setLabel('🎉 Enter').setStyle(ButtonStyle.Success)
                 );
-
+                
                 const channel = interaction.guild.channels.cache.find(c => c.name === 'giveaway') || interaction.channel;
-                const msg = await channel.send({ content: '@everyone ', embeds: [giveawayEmbed], components: [row] });
-
+                const msg = await channel.send({ content: '@everyone 🎁', embeds: [giveawayEmbed], components: [row] });
+                
                 const giveaways = loadData('giveaways.json');
-                const gId = msg.id;
-                giveaways[gId] = {
+                giveaways[msg.id] = {
                     prize, winners, endTime,
                     channelId: channel.id,
                     hostId: interaction.user.id,
                     entrants: []
                 };
                 saveData('giveaways.json', giveaways);
-
-                await interaction.reply({ content: ` Giveaway started in ${channel}!`, ephemeral: true });
-
-                // Schedule the draw
-                setTimeout(() => endGiveaway(gId, interaction.guild, channel, msg), hours * 3600000);
+                
+                await interaction.reply({ content: '🎉 Giveaway started in ' + channel + '!', ephemeral: true });
+                
+                setTimeout(() => endGiveaway(msg.id, interaction.guild, channel, msg), hours * 3600000);
                 break;
             }
-
+            
             case 'lock': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-                    return interaction.reply({ content: ' You need Manage Channels permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.ManageChannels)) {
+                    return interaction.reply({ content: '❝ You need Manage Channels permission!', ephemeral: true });
                 }
                 const ch = interaction.options.getChannel('channel') || interaction.channel;
                 await ch.permissionOverwrites.edit(interaction.guild.id, { SendMessages: false });
-                await interaction.reply({ content: ` Locked ${ch}`, ephemeral: true });
+                await interaction.reply({ content: '🔒 Locked ' + ch, ephemeral: true });
                 break;
             }
-
+            
             case 'unlock': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-                    return interaction.reply({ content: ' You need Manage Channels permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.ManageChannels)) {
+                    return interaction.reply({ content: '❝ You need Manage Channels permission!', ephemeral: true });
                 }
                 const ch = interaction.options.getChannel('channel') || interaction.channel;
                 await ch.permissionOverwrites.edit(interaction.guild.id, { SendMessages: true });
-                await interaction.reply({ content: ` Unlocked ${ch}`, ephemeral: true });
+                await interaction.reply({ content: '🔓 Unlocked ' + ch, ephemeral: true });
                 break;
             }
-
+            
             case 'slowmode': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-                    return interaction.reply({ content: ' You need Manage Channels permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.ManageChannels)) {
+                    return interaction.reply({ content: '❝ You need Manage Channels permission!', ephemeral: true });
                 }
                 const ch = interaction.options.getChannel('channel') || interaction.channel;
                 const sec = Math.min(interaction.options.getInteger('seconds'), 21600);
                 await ch.setRateLimitPerUser(sec);
-                await interaction.reply({ content: ` Slowmode set to ${sec}s in ${ch}`, ephemeral: true });
+                await interaction.reply({ content: '🐌 Slowmode: ' + sec + 's in ' + ch, ephemeral: true });
                 break;
             }
-
+            
             case 'kick': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.KickMembers)) {
-                    return interaction.reply({ content: ' You need Kick Members permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.KickMembers)) {
+                    return interaction.reply({ content: '❝ You need Kick Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
                 const reason = interaction.options.getString('reason') || 'No reason';
-                if (!target) return interaction.reply({ content: ' User not found in this server!', ephemeral: true });
-                if (!target.kickable) return interaction.reply({ content: ' I cannot kick this user!', ephemeral: true });
+                if (!target) return interaction.reply({ content: '❝ You not found in this server!', ephemeral: true });
+                if (!target.kickable) return interaction.reply({ content: '❝ I cannot kick this user!', ephemeral: true });
                 await target.kick(reason);
-                await interaction.reply({ content: ` Kicked ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
+                await interaction.reply({ content: '👢 Kicked ' + target.user.tag + ' | ' + reason, ephemeral: true });
                 break;
             }
-
+            
             case 'ban': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-                    return interaction.reply({ content: ' You need Ban Members permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.BanMembers)) {
+                    return interaction.reply({ content: '❝ You need Ban Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
                 const reason = interaction.options.getString('reason') || 'No reason';
-                if (!target) return interaction.reply({ content: ' User not found in this server!', ephemeral: true });
-                if (!target.bannable) return interaction.reply({ content: ' I cannot ban this user!', ephemeral: true });
+                if (!target) return interaction.reply({ content: '❝ You not found in this server!', ephemeral: true });
+                if (!target.bannable) return interaction.reply({ content: '❝ I cannot ban this user!', ephemeral: true });
                 await target.ban({ reason });
-                await interaction.reply({ content: ` Banned ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
+                await interaction.reply({ content: '🔨 Banned ' + target.user.tag + ' | ' + reason, ephemeral: true });
                 break;
             }
-
+            
             case 'mute': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-                    return interaction.reply({ content: ' You need Moderate Members permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.ModerateMembers)) {
+                    return interaction.reply({ content: '❝ You need Moderate Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
                 const mins = interaction.options.getInteger('minutes') || 10;
                 const reason = interaction.options.getString('reason') || 'No reason';
-                if (!target) return interaction.reply({ content: ' User not found!', ephemeral: true });
-                if (!target.moderatable) return interaction.reply({ content: ' I cannot mute this user!', ephemeral: true });
+                if (!target) return interaction.reply({ content: '❝ You not found in this server!', ephemeral: true });
+                if (!target.moderatable) return interaction.reply({ content: '❝ I cannot mute this user!', ephemeral: true });
                 await target.timeout(mins * 60000, reason);
-                await interaction.reply({ content: ` Muted ${target.user.tag} for ${mins} min | Reason: ${reason}`, ephemeral: true });
+                await interaction.reply({ content: '🔇 Muted ' + target.user.tag + ' for ' + mins + 'min | ' + reason, ephemeral: true });
                 break;
             }
-
+            
             case 'unmute': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-                    return interaction.reply({ content: ' You need Moderate Members permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.ModerateMembers)) {
+                    return interaction.reply({ content: '❝ You need Moderate Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
-                if (!target) return interaction.reply({ content: ' User not found!', ephemeral: true });
+                if (!target) return interaction.reply({ content: '❝ You not found in this server!', ephemeral: true });
                 await target.timeout(null);
-                await interaction.reply({ content: ` Unmuted ${target.user.tag}`, ephemeral: true });
+                await interaction.reply({ content: '🔊 Unmuted ' + target.user.tag, ephemeral: true });
                 break;
             }
-
-            case 'renumber': {
-                // Owner only - renumbers all orders sequentially by date
-                if (interaction.user.id !== config.ownerId && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.reply({ content: ' Owner only!', ephemeral: true });
-                }
-                await interaction.deferReply({ ephemeral: true });
-
-                const orders = loadData('orders.json');
-                const entries = Object.entries(orders);
-                if (entries.length === 0) {
-                    return interaction.editReply({ content: 'No orders to renumber.' });
-                }
-
-                // Sort by createdAt date (oldest first)
-                entries.sort((a, b) => {
-                    const dateA = new Date(a[1].createdAt || 0);
-                    const dateB = new Date(b[1].createdAt || 0);
-                    return dateA - dateB;
-                });
-
-                // Renumber sequentially
-                const newOrders = {};
-                let newOrderNo = 0;
-                for (const [oldKey, order] of entries) {
-                    newOrderNo++;
-                    const newOrderId = 'order_' + newOrderNo;
-                    order.orderNo = newOrderNo;
-                    newOrders[newOrderId] = order;
-                }
-
-                // Save
-                saveData('orders.json', newOrders);
-                saveData('counter.json', { orderCounter: newOrderNo });
-
-                await interaction.editReply({ content: ' Renumbered **' + entries.length + ' orders** sequentially (#1 to #' + newOrderNo + ')./n/nOld file backed up as `orders.json.bak`.' });
-                break;
-            }
-
+            
             case 'purge': {
-                if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-                    return interaction.reply({ content: ' You need Manage Messages permission!', ephemeral: true });
+                if (!interaction.member.permissions.has(PermissionBits.Flags.ManageMessages)) {
+                    return interaction.reply({ content: '❝ You need Manage Messages permission!', ephemeral: true });
                 }
                 const count = Math.min(interaction.options.getInteger('count'), 100);
-                if (count < 1) return interaction.reply({ content: ' Must delete at least 1 message!', ephemeral: true });
+                if (count < 1) return interaction.reply({ content: '❝ Must delete at least 1 message!', ephemeral: true });
                 await interaction.deferReply({ ephemeral: true });
                 const deleted = await interaction.channel.bulkDelete(count, true);
-                await interaction.editReply({ content: ` Deleted ${deleted.size} messages.` });
-                break;
-            }
-
-            case 'afk': {
-                const afkData = loadData('afk.json');
-                const afkReason = interaction.options.getString('reason') || 'AFK';
-                afkData[interaction.user.id] = { reason: afkReason, setAt: Date.now(), setAtIso: new Date().toISOString() };
-                saveData('afk.json', afkData);
-                await interaction.reply({ content: ' You are now AFK: **' + afkReason + '**', ephemeral: true });
-                break;
-            }
-
-            case 'earnings': {
-                const isStaffEarn = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-                if (!isStaffEarn) return interaction.reply({ content: ' Staff only!', ephemeral: true });
-                const orders = loadData('orders.json');
-                const allOrders = Object.values(orders);
-                const completed = allOrders.filter(o => o.status && o.status.includes('Completed'));
-                const pending = allOrders.filter(o => o.status && o.status.includes('Pending'));
-                let totalRevenue = 0;
-                completed.forEach(o => { if (o.price && o.price !== 'TBD' && o.price !== 'N/A') { const num = parseFloat(String(o.price).replace(/[^0-9.]/g, '')); if (!isNaN(num)) totalRevenue += num; } });
-                const today = new Date().toDateString();
-                const todayOrders = completed.filter(o => { if (!o.completedAt && !o.createdAt) return false; return new Date(o.completedAt || o.createdAt).toDateString() === today; });
-                const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-                const weekOrders = completed.filter(o => { const d = new Date(o.completedAt || o.createdAt).getTime(); return d > weekAgo; });
-                const productCount = {};
-                completed.forEach(o => { const p = o.product || 'Unknown'; productCount[p] = (productCount[p] || 0) + 1; });
-                const topProducts = Object.entries(productCount).sort((a, b) => b[1] - a[1]).slice(0, 5);
-                const embed = new EmbedBuilder().setTitle(' ' + STORE_NAME + ' Earnings').setColor('#00E5FF').setFooter({ text: STORE_NAME }).setTimestamp()
-                    .addFields({ name: ' Total Revenue', value: '' + totalRevenue.toFixed(2), inline: true }, { name: ' Completed', value: '' + completed.length, inline: true }, { name: ' Pending', value: '' + pending.length, inline: true }, { name: ' Today', value: '' + todayOrders.length + ' orders', inline: true }, { name: ' This Week', value: '' + weekOrders.length + ' orders', inline: true }, { name: ' Total Orders', value: '' + allOrders.length, inline: true });
-                if (topProducts.length > 0) embed.addFields({ name: ' Top Products', value: topProducts.map(([name, count], i) => (i + 1) + '. ' + name.slice(0, 25) + ' (' + count + ')').join('/n') });
-                await interaction.reply({ embeds: [embed], ephemeral: true });
-                break;
-            }
-
-            case 'blacklist': {
-                const isStaffBl = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-                if (!isStaffBl) return interaction.reply({ content: ' Staff only!', ephemeral: true });
-                const blTarget = interaction.options.getUser('user');
-                const blReason = interaction.options.getString('reason') || 'No reason';
-                const blacklist = loadData('blacklist.json');
-                if (blacklist[blTarget.id]) return interaction.reply({ content: ' ' + blTarget.tag + ' is already blacklisted!', ephemeral: true });
-                blacklist[blTarget.id] = { tag: blTarget.tag, reason: blReason, blacklistedBy: interaction.user.id, blacklistedAt: new Date().toISOString() };
-                saveData('blacklist.json', blacklist);
-                await interaction.reply({ content: ' **' + blTarget.tag + '** blacklisted. Reason: ' + blReason, ephemeral: true });
-                break;
-            }
-
-            case 'unblacklist': {
-                const isStaffUbl = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) || interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-                if (!isStaffUbl) return interaction.reply({ content: ' Staff only!', ephemeral: true });
-                const ublTarget = interaction.options.getUser('user');
-                const blacklist = loadData('blacklist.json');
-                if (!blacklist[ublTarget.id]) return interaction.reply({ content: ' ' + ublTarget.tag + ' is not blacklisted.', ephemeral: true });
-                delete blacklist[ublTarget.id];
-                saveData('blacklist.json', blacklist);
-                await interaction.reply({ content: ' **' + ublTarget.tag + '** removed from blacklist.', ephemeral: true });
+                await interaction.editReply({ content: '🗑️ Deleted ' + deleted.size + ' messages.' });
                 break;
             }
         }
     } catch (err) {
         console.error('Command error:', err);
-        if (!interaction.replied) await interaction.reply({ content: ' An error occurred!', ephemeral: true });
+        if (!interaction.replied && !interaction.deferred) {
+            await interaction.reply({ content: '❌ Error occurred!', ephemeral: true });
+        }
     }
 });
 
 // ==================== BUTTON & MODAL HANDLERS ====================
 client.on('interactionCreate', async (interaction) => {
-    // Buttons
     if (interaction.isButton()) {
         // Place Order
         if (interaction.customId === 'place_order') {
             // BLACKLIST CHECK
-            const blCheck = loadData('blacklist.json');
-            if (blCheck[interaction.user.id]) return interaction.reply({ content: ' You are blacklisted. Reason: ' + (blCheck[interaction.user.id].reason || 'N/A'), ephemeral: true });
+            const blacklist = loadData('blacklist.json');
+            if (blacklist[interaction.user.id]) {
+                return interaction.reply({ 
+                    content: '❝ You are blacklisted from creating tickets./nReason: ' + (blacklist[interaction.user.id].reason || 'N/A'), 
+                    ephemeral: true 
+                });
+            }
+            
             const modal = new ModalBuilder()
                 .setCustomId('order_modal')
-                .setTitle(` ${STORE_NAME} - Place Order`);
-
-            const productInput = new TextInputBuilder()
-                .setCustomId('order_product')
-                .setLabel('Product (e.g. Nitro Boost, Crunchyroll 6m)')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true);
-
-            const qtyInput = new TextInputBuilder()
-                .setCustomId('order_qty')
-                .setLabel('Quantity')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(true);
-
-            const priceInput = new TextInputBuilder()
-                .setCustomId('order_price')
-                .setLabel('Offer / Budget')
-                .setStyle(TextInputStyle.Short)
-                .setRequired(false);
-
-            const notesInput = new TextInputBuilder()
-                .setCustomId('order_notes')
-                .setLabel('Notes (payment method, details)')
-                .setStyle(TextInputStyle.Paragraph)
-                .setRequired(false);
-
+                .setTitle('🛒 Place Order');
+            
             modal.addComponents(
-                new ActionRowBuilder().addComponents(productInput),
-                new ActionRowBuilder().addComponents(qtyInput),
-                new ActionRowBuilder().addComponents(priceInput),
-                new ActionRowBuilder().addComponents(notesInput)
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('order_product')
+                        .setLabel('Product (e.g. Nitro Boost, Crunchyroll 6m)')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('order_qty')
+                        .setLabel('Quantity')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('order_price')
+                        .setLabel('Offer / Budget')
+                        .setStyle(TextInputStyle.Short)
+                        .setRequired(false)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('order_notes')
+                        .setLabel('Notes (payment method, details)')
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setRequired(false)
+                )
             );
+            
             await interaction.showModal(modal);
         }
-
+        
         // Support ticket
         if (interaction.customId === 'support_ticket') {
             // BLACKLIST CHECK
-            const blCheck2 = loadData('blacklist.json');
-            if (blCheck2[interaction.user.id]) return interaction.reply({ content: ' You are blacklisted. Reason: ' + (blCheck2[interaction.user.id].reason || 'N/A'), ephemeral: true });
-            const ticketChannel = await interaction.guild.channels.create({
+            const blacklist = loadData('blacklist.json');
+            if (blacklist[interaction.user.id]) {
+                return interaction.reply({ 
+                    content: '❝ You are blacklisted from creating tickets./nReason: ' + (blacklist[interaction.user.id].reason || 'N/A'), 
+                    ephemeral: true 
+                });
+            }
+            
+            const ticketChannel = await guild.channels.create({
                 name: `support-${interaction.user.username}`,
                 type: ChannelType.GuildText,
                 parent: interaction.guild.channels.cache.find(c => c.name.includes('SUPPORT'))?.id,
                 permissionOverwrites: [
-                    { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                    { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+                    { id: interaction.guild.id, deny: [PermissionBits.Flags.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionBits.Flags.ViewChannel, PermissionBits.Flags.SendMessages, PermissionBits.Flags.ReadMessageHistory] }
                 ]
             });
-
+            
             const embed = new EmbedBuilder()
-                .setTitle(' Support Ticket')
-                .setDescription(`Ticket created by ${interaction.user}\n\nDescribe your issue. Staff will help shortly.`)
+                .setTitle('🎧 Support Ticket')
+                .setDescription(`Ticket created by ${interaction.user}/n/nDescribe your issue. Staff will help shortly.`)
                 .setColor('#0099FF')
                 .setFooter({ text: STORE_NAME });
-
+            
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('')
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
             );
-
+            
             await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
             await interaction.reply({ content: `Ticket created: ${ticketChannel}`, ephemeral: true });
         }
-
+        
         // Close ticket - Admin/Owner only
         if (interaction.customId === 'close_ticket') {
             const isStaffClose = interaction.member.roles.cache.some(r => ['Owner', 'Admin'].includes(r.name)) ||
-                interaction.member.permissions.has(PermissionFlagsBits.Administrator);
+                interaction.member.permissions.has(PermissionBits.Flags.Administrator);
             if (!isStaffClose) {
-                return interaction.reply({ content: ' Only Admins or Owner can close tickets!', ephemeral: true });
+                return interaction.reply({ content: '❝ Only Admins or Owner can close tickets!', ephemeral: true });
             }
-
+            
             const embed = new EmbedBuilder()
-                .setTitle(' Ticket Closed')
+                .setTitle('🔒 Ticket Closed')
                 .setDescription(`Closed by ${interaction.user.tag}`)
                 .setColor('#FF5555')
                 .setFooter({ text: STORE_NAME });
-
+            
             const logChannel = interaction.guild.channels.cache.find(c => c.name === 'ticket-logs');
             if (logChannel) await logChannel.send({ embeds: [embed] });
-            await interaction.reply({ content: ' Closing ticket...' });
+            await interaction.reply({ content: '🔒 Closing ticket...' });
             await interaction.channel.delete();
         }
-
+        
         // Buy product button
         if (interaction.customId.startsWith('buy_')) {
             const productId = interaction.customId.replace('buy_', '');
             const products = loadData('products.json');
             const product = products[productId];
-            if (!product) return interaction.reply({ content: ' Product not found!', ephemeral: true });
-
-            // Create order ticket
-            // FIX: Use getNextOrderNo()
+            if (!product) return interaction.reply({ content: '❝ Product not found!', ephemeral: true });
+            
             const orderNo = getNextOrderNo();
             const orders = loadData('orders.json');
-            const orderId = `order_${orderNo}`;
+            const orderId = 'order_' + orderNo;
             orders[orderId] = {
                 orderNo,
-                product: product.name,
-                price: product.price,
+                product: product.name || product.description?.slice(0, 50) || 'Product',
+                price: product.price || 'TBD',
                 quantity: 1,
                 buyer: interaction.user.id,
                 seller: product.seller,
-                status: ' Pending',
+                status: '⏳ Pending',
                 createdAt: new Date().toISOString()
             };
             saveData('orders.json', orders);
-
-            const ticketChannel = await interaction.guild.channels.create({
+            
+            const ticketChannel = await guild.channels.create({
                 name: `order-${orderNo}`,
                 type: ChannelType.GuildText,
-                parent: interaction.guild.channels.cache.find(c => c.name.includes('SUPPORT'))?.id,
+                parent: guild.channels.cache.find(c => c.name.includes('SUPPORT'))?.id,
                 permissionOverwrites: [
-                    { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                    { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-                    { id: product.seller, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+                    { id: interaction.guild.id, deny: [PermissionBits.Flags.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionBits.Flags.ViewChannel, PermissionBits.Flags.SendMessages, PermissionBits.Flags.ReadMessageHistory] },
+                    { id: product.seller, allow: [PermissionBits.Flags.ViewChannel, PermissionBits.Flags.SendMessages, PermissionBits.Flags.ReadMessageHistory] }
                 ]
             });
-
+            
             const embed = new EmbedBuilder()
-                .setTitle(` Order No: ${orderNo}`)
-                .setDescription(`**Product:** ${product.name}\n**Price:** ${product.price}\n**Quantity:** 1\n**Buyer:** <@${interaction.user.id}>\n\nComplete payment with the seller to confirm your order.`)
+                .setTitle('🧾 Order #' + orderNo)
+                .setDescription('**Product:** ' + (product.name || product.description?.slice(0, 50)) + '/n**Price:** ' + (product.price || 'TBD') + '/n**Quantity:** 1/n**Buyer:** <@' + interaction.user.id + '>/n/nComplete payment with the seller to confirm your order.')
                 .setColor('#FF8800')
                 .setFooter({ text: STORE_NAME })
                 .setTimestamp();
-
+            
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel(' Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji(''),
-                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel(' Confirm & Complete').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('close_ticket').setLabel(' Close').setStyle(ButtonStyle.Danger)
+                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('💳 Send Payment QR').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Confirm & Complete').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
             );
-
-            await ticketChannel.send({ content: `<@${interaction.user.id}> <@${product.seller}>`, embeds: [embed], components: [row] });
+            
+            await ticketChannel.send({ content: `<@${interaction.user.id}> <@${product.seller}>` , embeds: [embed], components: [row] });
             await interaction.reply({ content: `Order #${orderNo} created! Staff will review shortly. Channel: ${ticketChannel}`, ephemeral: true });
         }
-
+        
         // Complete order - Staff only
         if (interaction.customId.startsWith('complete_')) {
-            const isStaffComplete = interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff', 'Seller'].includes(r.name)) ||
-                interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-            if (!isStaffComplete) {
-                return interaction.reply({ content: ' Only staff can confirm orders!', ephemeral: true });
+            if (!interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff', 'Seller'].includes(r.name))) {
+                return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
             }
-
+            
             await interaction.deferReply();
-
+            
             const orderId = interaction.customId.replace('complete_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.editReply({ content: ' Order not found!' });
-
-            order.status = ' Completed';
-            order.completedBy = interaction.user.id;
-            order.completedAt = new Date().toISOString();
+            if (!order) return interaction.editReply({ content: '❝ Not found!' });
+            
+            order.status = '✅ Completed';
+            order.confirmedBy = interaction.user.id;
+            order.confirmedAt = new Date().toISOString();
             saveData('orders.json', orders);
-
-            // Post in orders channel
+            
             const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
             if (ordersChannel) {
                 const embed = new EmbedBuilder()
-                    .setTitle(' Order Confirmed')
-                    .setDescription(`**Order No:** ${order.orderNo}
-**Product:** ${order.product}
-**Quantity:** ${order.quantity}
-**Buyer:** <@${order.buyer}>`)
+                    .setTitle('✅ Order Confirmed')
+                    .setDescription('**Order No:** ' + order.orderNo + '/n**Product:** ' + order.product + '/n**Quantity:** ' + (order.quantity || 1) + '/n**Buyer:** <@' + order.buyer + '>')
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME })
                     .setTimestamp();
                 await ordersChannel.send({ embeds: [embed] });
             }
-
-            await interaction.editReply({ content: ` Order #${order.orderNo} confirmed by staff!` });
-
-            // AUTO-DM: Notify buyer via DM
-            try {
-                const dmBuyer = await interaction.guild.members.fetch(order.buyer);
-                if (dmBuyer) {
-                    const dmEmbed = new EmbedBuilder().setTitle(' Order Confirmed!')
-                        .setDescription('Your order **#' + order.orderNo + '** (' + order.product + ') has been confirmed by staff!')
-                        .setColor('#00C853').setFooter({ text: STORE_NAME }).setTimestamp();
-                    await dmBuyer.send({ embeds: [dmEmbed] }).catch(() => {});
-                }
-            } catch (e) { /* DM failed - user may have DMs disabled */ }
-
+            
+            await interaction.editReply({ content: '✅ Order #' + order.orderNo + ' confirmed by staff!' });
+            
             // Now show vouch button to buyer ONLY after staff confirmed
-                // FIX: Use colon separator for customId
-                const vouchRow = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId(`vouch:${orderId}:${order.buyer}`).setLabel(' Vouch Now').setStyle(ButtonStyle.Secondary).setEmoji('')
-                );
+            const vouchRow = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`vouch:${orderId}:${order.buyer}`).setLabel('⭐ Vouch Now').setStyle(ButtonStyle.Secondary)
+            );
+            
             const vouchPrompt = new EmbedBuilder()
-                .setTitle(' Order Complete!')
-                .setDescription(`<@${order.buyer}>, your order **#${order.orderNo}** (${order.product}) has been **confirmed by staff**! 
-
-Click ** Vouch Now** to leave a vouch.`)
+                .setTitle('🎉 Order Complete!')
+                .setDescription(`<@${order.buyer}>, your order **#${order.orderNo}** (${order.product}) has been **confirmed by staff**!`)
                 .setColor('#FFD700')
                 .setFooter({ text: STORE_NAME });
+            
             await interaction.channel.send({ embeds: [vouchPrompt], components: [vouchRow] });
         }
-
-// UPI payment button in order ticket -> staff sends QR to buyer
+        
+        // UPI payment button in order ticket -> staff sends QR to buyer
         if (interaction.customId.startsWith('send_upi_')) {
-            const isStaffUPI = interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
-                interaction.member.permissions.has(PermissionFlagsBits.Administrator);
-            if (!isStaffUPI) {
-                return interaction.reply({ content: ' Only staff can send payment QR!', ephemeral: true });
+            if (!interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name))) {
+                return interaction.reply({ content: '❝ Staff only!', ephemeral: true });
             }
-
+            
             await interaction.deferReply();
-
+            
             const orderId = interaction.customId.replace('send_upi_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.editReply({ content: ' Order not found!' });
-
-            const amount = order?.price ? String(order.price).replace(/[^0-9.]/g, '') : '';
-            const note = order ? 'Order #' + order.orderNo + ' - ' + order.product : 'Order payment';
-
+            if (!order) return interaction.editReply({ content: '❝ Not found!' });
+            
+            const amount = order.price ? String(order.price).replace(/[^0-9.]/g, '') : '';
+            const note = 'Order #' + order.orderNo + ' - ' + order.product;
+            
             const { embed, file } = await upiEmbed(config.upiId, amount, null, note);
             const payload = file ? { embeds: [embed], files: [file] } : { embeds: [embed] };
             await interaction.editReply({ content: `<@${order.buyer}>, here is the payment QR:`, ...payload });
             return;
         }
-
+        
         // Giveaway enter button
         if (interaction.customId === 'enter_giveaway') {
             const giveaways = loadData('giveaways.json');
             const gId = interaction.message.id;
             const ga = giveaways[gId];
-            if (!ga) return interaction.reply({ content: ' This giveaway has ended.', ephemeral: true });
-            if (Date.now() > ga.endTime) return interaction.reply({ content: ' This giveaway has ended.', ephemeral: true });
+            if (!ga) return interaction.reply({ content: '❝ This giveaway has ended.', ephemeral: true });
+            if (Date.now() > ga.endTime) return interaction.reply({ content: '❝ This giveaway has ended.', ephemeral: true });
             if (ga.entrants.includes(interaction.user.id)) {
-                return interaction.reply({ content: ' You already entered!', ephemeral: true });
+                return interaction.reply({ content: '❝ You already entered!', ephemeral: true });
             }
             ga.entrants.push(interaction.user.id);
-            // FIX: Deduplicate entrants
+            // Deduplicate
             ga.entrants = [...new Set(ga.entrants)];
             saveData('giveaways.json', giveaways);
-
-            // Update the embed with entry count
-            // FIX: Don't append entries text, replace it
+            // Don't append entries text, replace it
             try {
                 const embed = interaction.message.embeds[0];
                 if (embed) {
                     let desc = embed.description || '';
-                    // Remove old entries line if present
-                    const entriesIdx = desc.indexOf('**Entries:**');
-                    if (entriesIdx > -1) {
-                        desc = desc.substring(0, entriesIdx).trimEnd();
-                    }
+                    desc = desc.replace(/.*/*/*Entries:/*/*/s*/d+/g, '');
                     desc += '/n/n**Entries:** ' + ga.entrants.length;
                     const newEmbed = EmbedBuilder.from(embed).setDescription(desc);
                     await interaction.message.edit({ embeds: [newEmbed] });
                 }
             } catch (e) { /* ignore */ }
-
-            await interaction.reply({ content: ` You entered the giveaway! (${ga.entrants.length} entries)`, ephemeral: true });
+            
+            await interaction.reply({ content: `🎉 You entered the giveaway! (${ga.entrants.length} entries)`, ephemeral: true });
             return;
         }
-
+        
         // Vouch button in order ticket -> opens vouch modal
-        // FIX: Use colon separator to avoid parsing ambiguity
-        // CustomId format: vouch:{orderId}:{buyerId}
         if (interaction.customId.startsWith('vouch:')) {
-            const parts = interaction.customId.split(':'); // vouch:order_5:1234567890
+            const parts = interaction.customId.split(':'); // vouch:orderId:buyerId
             const orderId = parts[1]; // e.g. "order_5"
             const buyerId = parts[2]; // actual Discord user ID
-
-            // Only allow the buyer of this order to vouch
+            
             if (interaction.user.id !== buyerId) {
-                return interaction.reply({ content: ' Only the buyer of this order can vouch!', ephemeral: true });
+                return interaction.reply({ content: '❝ Only the buyer of this order can vouch!', ephemeral: true });
             }
-
+            
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.reply({ content: ' Order not found!', ephemeral: true });
-
-            // Only allow vouch if staff has completed the order
-            if (!order.completedBy) {
-                return interaction.reply({ content: ' Order must be confirmed by staff before you can vouch! Wait for staff to complete your order.', ephemeral: true });
+            if (!order) return interaction.reply({ content: '❝ Order not found!', ephemeral: true });
+            
+            if (!order.confirmedBy) {
+                return interaction.reply({ content: '❝ Order must be confirmed by staff before you can vouch! Wait for staff to complete your order first!', ephemeral: true });
             }
-
+            
             const modal = new ModalBuilder()
                 .setCustomId(`vouch_modal:${orderId}`)
-                .setTitle(' Leave a Vouch');
-
-            const ratingInput = new TextInputBuilder()
-                .setCustomId('vouch_rating')
-                .setLabel('Rating (1-5)')
-                .setStyle(TextInputStyle.Short)
-                .setValue('5')
-                .setRequired(true);
-
-            const reviewInput = new TextInputBuilder()
-                .setCustomId('vouch_review')
-                .setLabel('Your review')
-                .setStyle(TextInputStyle.Paragraph)
-                .setPlaceholder(`How was buying ${order.product}?`)
-                .setRequired(true);
-
+                .setTitle('⭐ Leave a Vouch');
+            
             modal.addComponents(
-                new ActionRowBuilder().addComponents(ratingInput),
-                new ActionRowBuilder().addComponents(reviewInput)
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('vouch_rating')
+                        .setLabel('Rating (1-5)')
+                        .setStyle(TextInputStyle.Short)
+                        .setValue('5')
+                        .setRequired(true)
+                ),
+                new ActionRowBuilder().addComponents(
+                    new TextInputBuilder()
+                        .setCustomId('vouch_review')
+                        .setLabel('Your review')
+                        .setStyle(TextInputStyle.Paragraph)
+                        .setPlaceholder(`How was buying ${order.product}?`)
+                        .setRequired(true)
+                )
             );
-
+            
             await interaction.showModal(modal);
         }
     }
-
-    // Modal submit (order)
+    
+    // Modal submit
     if (interaction.isModalSubmit()) {
-        // Vouch modal submit -> posts to #vouches AND #orders
+        // Vouch modal
         if (interaction.customId.startsWith('vouch_modal:')) {
             const orderId = interaction.customId.replace('vouch_modal:', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.reply({ content: ' Order not found!', ephemeral: true });
-
+            if (!order) return interaction.reply({ content: '❝ Order not found!', ephemeral: true });
+            
             const rating = interaction.fields.getTextInputValue('vouch_rating');
             const review = interaction.fields.getTextInputValue('vouch_review');
-
+            
             const sellerId = order.seller;
-            const seller = interaction.guild.members.cache.get(sellerId) || { user: { tag: `Seller <@${sellerId}>` } };
-            const sellerTag = seller.user?.tag || `@${sellerId}`;
-
+            const sellerTag = interaction.guild.members.cache.get(sellerId)?.user?.tag || 'Seller';
+            
             // Save vouch
             const vouches = loadData('vouches.json');
             if (!vouches[sellerId]) vouches[sellerId] = { count: 0, reviews: [] };
@@ -1651,99 +1272,58 @@ Click ** Vouch Now** to leave a vouch.`)
                 product: order.product,
                 orderNo: order.orderNo,
                 rating: rating,
-                review,
+                review: review,
                 date: new Date().toISOString()
             });
             saveData('vouches.json', vouches);
             if (interaction.guild) await assignVerifiedBuyer(interaction.guild, interaction.user.id);
-
-            // Mark order complete
-            order.status = ' Completed (Vouched)';
+            
+            order.status = '✅ Completed (Vouched)';
             order.vouched = true;
             order.vouchReview = review;
             order.vouchRating = rating;
             order.completedAt = new Date().toISOString();
             saveData('orders.json', orders);
-
-            const stars = ''.repeat(Math.min(parseInt(rating) || 5, 5));
-
-            // 1) Post vouch in #vouches
+            
+            const stars = '⭐'.repeat(Math.min(parseInt(rating) || 5, 5));
+            
             const vouchEmbed = new EmbedBuilder()
-                .setTitle(' New Vouch!')
+                .setTitle('✨⭐🎉 New Vouch!')
                 .setDescription(`**${interaction.user.tag}** vouched for **${sellerTag}**`)
                 .addFields(
-                    { name: ' Product', value: order.product, inline: true },
-                    { name: ' Order', value: `#${order.orderNo}`, inline: true },
+                    { name: '🛒 Product', value: order.product, inline: true },
+                    { name: '🧾 Order', value: '#' + order.orderNo, inline: true },
                     { name: 'Rating', value: `${stars} (${rating}/5)` },
-                    { name: ' Review', value: review },
-                    { name: 'Total Vouches', value: `${vouches[sellerId].count}` }
+                    { name: '📝 Review', value: review },
+                    { name: 'Total Vouches', value: '' + vouches[sellerId].count }
                 )
                 .setColor('#FFD700')
-                .setFooter({ text: STORE_NAME })
-                .setTimestamp();
-
-            const vouchChannel = interaction.guild.channels.cache.find(c => c.name === 'vouches');
-            if (vouchChannel) {
-                await vouchChannel.send({ embeds: [vouchEmbed] });
-            }
-
-            // 2) AUTOMATICALLY post "Order Completed" in #orders
-            const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
+                .setFooter({ text: STORE_NAME });
+            
+            const vouchChannel = guild.channels.cache.find(c => c.name === 'vouches');
+            if (vouchChannel) await vouchChannel.send({ embeds: [vouchEmbed] });
+            
+            const ordersChannel = guild.channels.cache.find(c => c.name === 'orders');
             if (ordersChannel) {
                 const completeEmbed = new EmbedBuilder()
-                    .setTitle(' Order Completed')
-                    .setDescription(`**Order No:** ${order.orderNo}\n**Product:** ${order.product}\n**Quantity:** ${order.quantity}\n**Buyer:** <@${interaction.user.id}>`)
+                    .setTitle('✨⭐✅ Order Completed')
+                    .setDescription('**Order:** #' + order.orderNo + '/n**Product:** ' + order.product + '/n**Buyer:** <@' + interaction.user.id + '>')
                     .addFields(
-                        { name: ' Vouch', value: `${stars}  ${review}` },
-                        { name: ' Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>` }
+                        { name: '⭐ Vouch', value: `${stars} //cdot ${review}` },
+                        { name: '🕒 Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>` }
                     )
                     .setColor('#00C853')
-                    .setFooter({ text: STORE_NAME })
-                    .setTimestamp();
+                    .setFooter({ text: STORE_NAME });
+                
                 const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-                await orderMsg.react('').catch(() => {});
+                await orderMsg.react('/u2705').catch(() => {});
             }
-
-            await interaction.reply({ content: ` Vouch submitted! Posted in #vouches and logged in #orders.`, ephemeral: true });
+            
+            await interaction.reply({ content: '✅ Vouch submitted! Posted in #vouches and logged in #orders.', ephemeral: true });
             return;
         }
-
-        if (interaction.customId.startsWith('product_modal_')) {
-            const channelName = interaction.customId.replace('product_modal_', '');
-            const desc = interaction.fields.getTextInputValue('product_desc');
-
-            const products = loadData('products.json');
-            const id = Date.now().toString();
-            products[id] = {
-                description: desc,
-                seller: interaction.user.id,
-                channel: channelName,
-                createdAt: new Date().toISOString()
-            };
-            saveData('products.json', products);
-
-            const embed = new EmbedBuilder()
-                .setDescription(desc)
-                .setColor('#00C853')
-                .setFooter({ text: `${STORE_NAME}  ${channelName}` })
-                .setTimestamp();
-
-            const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`buy_${id}`).setLabel('Order Now').setStyle(ButtonStyle.Success).setEmoji('')
-            );
-
-            const shopChannel = interaction.guild.channels.cache.find(c => c.name === channelName) ||
-                interaction.guild.channels.cache.find(c => c.name === 'restock');
-            if (shopChannel) {
-                await shopChannel.send({ embeds: [embed], components: [row] });
-                await interaction.reply({ content: ` Posted in #${shopChannel.name}!`, ephemeral: true });
-            } else {
-                await interaction.reply({ content: ' Could not find shop channel.', ephemeral: true });
-            }
-            return;
-        }
-
-        // Announcement modal submit
+        
+        // Announcement modal
         if (interaction.customId === 'announcement_modal') {
             const title = interaction.fields.getTextInputValue('ann_title');
             const body = interaction.fields.getTextInputValue('ann_body');
@@ -1753,29 +1333,56 @@ Click ** Vouch Now** to leave a vouch.`)
             if (pingChoice === 'everyone') pingText = '@everyone ';
             else if (pingChoice === 'here') pingText = '@here ';
             const embed = new EmbedBuilder()
-                .setTitle(' ' + title)
+                .setTitle('📢 ' + title)
                 .setDescription(body)
                 .setColor('#' + colorHex.replace('#', ''))
-                .setFooter({ text: STORE_NAME + '  Announcement' })
+                .setFooter({ text: STORE_NAME + ' · Announcement' })
                 .setTimestamp();
-            const targetChannel = interaction.guild.channels.cache.find(c => c.name === 'announce');
-            if (!targetChannel) return interaction.reply({ content: ' Could not find #announce channel!', ephemeral: true });
+            const targetChannel = interaction.guild.channels.cache.find(c => c.name === (interaction.options?.getString('channel') || 'announce'));
+            if (!targetChannel) return interaction.reply({ content: '❝ Could not find #announce channel!', ephemeral: true });
             await targetChannel.send({ content: pingText, embeds: [embed] });
-            await interaction.reply({ content: ' Announcement sent to ' + targetChannel + '!', ephemeral: true });
+            await interaction.reply({ content: '✅ Announcement sent to ' + targetChannel + '!', ephemeral: true });
             return;
         }
-
+        
+        // Product modal
+        if (interaction.customId.startsWith('product_modal_')) {
+            const channelName = interaction.customId.replace('product_modal_', '');
+            const desc = interaction.fields.getTextInputValue('product_desc');
+            const products = loadData('products.json');
+            const id = Date.now().toString();
+            products[id] = { description: desc, seller: interaction.user.id, channel: channelName, createdAt: new Date().toISOString() };
+            saveData('products.json', products);
+            
+            const embed = new EmbedBuilder()
+                .setDescription(desc)
+                .setColor('#00C853')
+                .setFooter({ text: STORE_NAME + ' · ' + channelName })
+                .setTimestamp();
+            
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setCustomId(`buy_${id}`).setLabel('Order Now').setStyle(ButtonStyle.Success).setEmoji('🛒')
+            );
+            
+            const shopChannel = guild.channels.cache.find(c => c.name === channelName) || guild.channels.cache.find(c => c.name === 'restock');
+            if (shopChannel) {
+                await shopChannel.send({ embeds: [embed], components: [row] });
+                await interaction.reply({ content: '✅ Posted in #' + shopChannel.name + '!', ephemeral: true });
+            } else {
+                await interaction.reply({ content: '❝ Channel not found.', ephemeral: true });
+            }
+            return;
+        }
+        
+        // Order modal
         if (interaction.customId === 'order_modal') {
             const product = interaction.fields.getTextInputValue('order_product');
             const qty = interaction.fields.getTextInputValue('order_qty');
             const price = interaction.fields.getTextInputValue('order_price') || 'TBD';
             const notes = interaction.fields.getTextInputValue('order_notes') || 'None';
-
-            // FIX: Use getNextOrderNo() for consistent counter
             const orderNo = getNextOrderNo();
-
             const orders = loadData('orders.json');
-            const orderId = `order_${orderNo}`;
+            const orderId = 'order_' + orderNo;
             orders[orderId] = {
                 orderNo,
                 product,
@@ -1783,37 +1390,39 @@ Click ** Vouch Now** to leave a vouch.`)
                 price,
                 notes,
                 buyer: interaction.user.id,
-                status: ' Pending',
+                status: '⏳ Pending',
                 createdAt: new Date().toISOString()
             };
             saveData('orders.json', orders);
-
-            const ticketChannel = await interaction.guild.channels.create({
+            
+            const ticketChannel = await guild.channels.create({
                 name: `order-${orderNo}`,
                 type: ChannelType.GuildText,
-                parent: interaction.guild.channels.cache.find(c => c.name.includes('SUPPORT'))?.id,
+                parent: guild.channels.cache.find(c => c.name.includes('SUPPORT'))?.id,
                 permissionOverwrites: [
-                    { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-                    { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
+                    { id: interaction.guild.id, deny: [PermissionBits.Flags.ViewChannel] },
+                    { id: interaction.user.id, allow: [PermissionBits.Flags.ViewChannel, PermissionBits.Flags.SendMessages, PermissionBits.Flags.ReadMessageHistory] }
                 ]
             });
-
+            
             const embed = new EmbedBuilder()
-                .setTitle(` Order No: ${orderNo}`)
-                .setDescription(`**Product:** ${product}\n**Quantity:** ${qty}\n**Offer:** ${price}\n**Notes:** ${notes}\n**Buyer:** <@${interaction.user.id}>\n\nA staff member will confirm your order shortly.`)
+                .setTitle('🧾 Order #' + orderNo)
+                .setDescription('**Product:** ' + product + '/n**Quantity:** ' + qty + '/n**Offer:** ' + price + '/n**Notes:** ' + notes + '/n**Buyer:** <@' + interaction.user.id + '>/n/nA staff member will confirm your order shortly.')
                 .setColor('#FF8800')
                 .setFooter({ text: STORE_NAME })
                 .setTimestamp();
-
+            
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel(' Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji(''),
-                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel(' Confirm & Complete').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('close_ticket').setLabel(' Close').setStyle(ButtonStyle.Danger)
+                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('💳 Send Payment QR').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Confirm & Complete').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
             );
-
-            await ticketChannel.send({ content: `<@${interaction.user.id}>
-<@${config.ownerId}>`, embeds: [embed], components: [row] });
-            await interaction.reply({ content: ` Order #${orderNo} placed! Staff will review shortly.`, ephemeral: true });
+            
+            // Only ping owner if ownerId is set
+            const pingContent = config.ownerId ? `<@${interaction.user.id}>/<@${config.ownerId}>` : `<@${interaction.user.id}>`;
+            
+            await ticketChannel.send({ content: pingContent, embeds: [embed], components: [row] });
+            await interaction.reply({ content: '✅ Order #' + orderNo + ' placed!', ephemeral: true });
         }
     }
 });
@@ -1827,29 +1436,33 @@ Click ** Vouch Now** to leave a vouch.`)
 //   4. Logs the vouch for the seller
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-
+    
     const vouchChannel = message.guild?.channels.cache.find(c => c.name === 'vouches');
     if (!vouchChannel) return;
     if (message.channel.id !== vouchChannel.id) return;
-
-    // Only detect messages that look like a vouch
+    
     const text = message.content;
     const vouchKeywords = /(?:legit|rep|bought|vouch|purchased|trusted|positive)/i;
     if (!vouchKeywords.test(text)) return;
-
+    
     // 1) Parse the seller - first mention, or snowflake ID in text, else store owner
     let sellerId = message.mentions.users.first()?.id;
     if (!sellerId) {
         const snowflake = text.match(/([0-9]{17,20})/);
         if (snowflake) sellerId = snowflake[1];
     }
-    if (!sellerId) sellerId = config.ownerId; // fallback to store owner
+    // Validate seller is a real guild member
+    if (sellerId) {
+        const sellerMember = message.guild.members.cache.get(sellerId);
+        if (!sellerMember) sellerId = null;
+    }
+    if (!sellerId && config.ownerId) sellerId = config.ownerId;
     if (!sellerId) {
         // No seller found - ask user to mention the seller
         await message.reply('Please mention the seller! Example: `+legit bought nitro 1m rs600 @Seller`').catch(() => {});
         return;
     }
-
+    
     // 2) Parse the product - text after "bought/purchased"
     let product = 'Unknown Product';
     const boughtMatch = text.match(/(?:bought|purchased)[ ]+(?:1x[ ]*|x[ ]*|[0-9]+[ ]*x[ ]*)?(.+?)(?:[ ]+(?:for|in|at)[ ]+[$]?[ ]*[0-9]|[ ]*$)/i);
@@ -1862,15 +1475,14 @@ client.on('messageCreate', async (message) => {
         p = p.trim();
         // split on spaces/brackets/pipes, filter noise words
         const stop = new Set(['fw', 'for', 'in', 'at', 'bought', 'the', 'a']);
-        const words = p.split(/[ |[]/).filter(w => w.length > 0 && w.length < 20 && !/%/.test(w) && !/]/.test(w) && !stop.has(w.toLowerCase()));
+        const words = p.split(/[ |[]/).filter(w => w.length > 0 && w.length < 20 && !/%/.test(w) && !stop.has(w.toLowerCase()));
         product = words.slice(0, 4).join(' ') || 'Unknown Product';
     }
-
+    
     // 3) Parse the price
     let price = '';
     let m = text.match(/([0-9]+(?:[.][0-9]+)?)[ ]*(?:rs|rupees|inr|[$]|usd|dollars|euros|bucks)/i);
     if (!m) m = text.match(/[$][ ]*([0-9]+(?:[.][0-9]+)?)/);
-    // fallback: a number right after "for/in/at" with no currency word (assume INR)
     if (!m) m = text.match(/(?:for|in|at)[ ]+([0-9]+(?:[.][0-9]+)?)/i);
     if (m) {
         const amount = m[1];
@@ -1878,11 +1490,10 @@ client.on('messageCreate', async (message) => {
         else if (/euro/i.test(m[0])) price = 'EUR ' + amount;
         else price = 'INR ' + amount;
     }
-
+    
     // 4) Generate order number
-    // FIX: Use getNextOrderNo()
     const orderNo = getNextOrderNo();
-
+    
     // 5) Save the order as completed
     const orders = loadData('orders.json');
     const orderId = `auto_${orderNo}`;
@@ -1892,14 +1503,14 @@ client.on('messageCreate', async (message) => {
         price: price || 'N/A',
         buyer: message.author.id,
         seller: sellerId,
-        status: ' Completed',
+        status: '✅ Completed',
         source: 'vouch-message',
         vouched: true,
         vouchText: text,
         completedAt: new Date().toISOString()
     };
     saveData('orders.json', orders);
-
+    
     // 6) Save the vouch for the seller
     const vouches = loadData('vouches.json');
     if (!vouches[sellerId]) vouches[sellerId] = { count: 0, reviews: [] };
@@ -1914,73 +1525,47 @@ client.on('messageCreate', async (message) => {
     });
     saveData('vouches.json', vouches);
     if (message.guild) await assignVerifiedBuyer(message.guild, message.author.id);
-
+    
     // 7) POST the "Order Completed" box in #orders (aesthetic design)
     const ordersChannel = message.guild.channels.cache.find(c => c.name === 'orders');
     if (ordersChannel) {
         const sellerTag = message.guild.members.cache.get(sellerId)?.user?.tag || (sellerId === config.ownerId ? STORE_NAME : 'Seller');
         const vouchText = text.length > 150 ? text.slice(0, 147) + '...' : text;
         const completeEmbed = new EmbedBuilder()
-            .setTitle(` ORDER #${orderNo}`)
-            .setDescription(`**Item:** ${product}\n**Price:** ${price || 'N/A'}\n**Buyer:** <@${message.author.id}>\n**Seller:** ${sellerTag}`)
+            .setTitle('✨ ORDER #' + orderNo)
+            .setDescription(`**Item:** ${product}/n**Price:** ${price || 'N/A'}/n**Buyer:** <@${message.author.id}>/n**Seller:** ${sellerTag}`)
             .addFields(
-                { name: ' Vouch', value: '> ' + vouchText },
-                { name: ' Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
+                { name: '⭐ Vouch', value: '> ' + vouchText },
+                { name: '🕒 Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>` }
             )
             .setColor('#00C853')
-            .setFooter({ text: `${STORE_NAME}  Confirmed Order` })
+            .setFooter({ text: STORE_NAME + ' · Confirmed Order' })
             .setTimestamp();
         const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-        await orderMsg.react('').catch(() => {});
+        await orderMsg.react('/u2705').catch(() => {});
     }
-
+    
     // 8) Confirm to the buyer + add a vouch reaction embed
     const vouchEmbed = new EmbedBuilder()
-        .setTitle(' Vouch Logged')
+        .setTitle('✨⭐🎉 Vouch Logged')
         .setDescription(`Vouch submitted for **${product}** - **${price || 'N/A'}**`)
         .addFields(
-            { name: ' Order No', value: `#${orderNo}`, inline: true },
-            { name: ' Buyer', value: `<@${message.author.id}>`, inline: true }
+            { name: '🧾 Order No', value: '#' + orderNo, inline: true },
+            { name: '👤 Buyer', value: '<@${message.author.id}>', inline: true }
         )
         .setColor('#FFD700')
-        .setFooter({ text: `${STORE_NAME}  Vouch #${vouches[sellerId].count}` });
+        .setFooter({ text: STORE_NAME + ' · Vouch #${vouches[sellerId].count}' });
+    
     await message.channel.send({ embeds: [vouchEmbed] });
 });
 
-// ==================== AFK HANDLER ====================
-client.on('messageCreate', async (message) => {
-    if (message.author.bot || !message.guild) return;
-    // Check if mentioned users are AFK
-    if (message.mentions.users.size > 0) {
-        const afkData = loadData('afk.json');
-        for (const [userId, afk] of Object.entries(afkData)) {
-            if (message.mentions.users.has(userId)) {
-                const member = message.guild.members.cache.get(userId);
-                const name = member ? member.user.tag : userId;
-                const duration = Math.floor((Date.now() - afk.setAt) / 60000);
-                const timeStr = duration < 60 ? duration + 'm' : Math.floor(duration / 60) + 'h ' + (duration % 60) + 'm';
-                await message.channel.send(' **' + name + '** is AFK: ' + afk.reason + ' (for ' + timeStr + ')').catch(() => {});
-            }
-        }
-    }
-    // Remove AFK when user sends a message
-    const afkData2 = loadData('afk.json');
-    if (afkData2[message.author.id]) {
-        delete afkData2[message.author.id];
-        saveData('afk.json', afkData2);
-        await message.channel.send(' Welcome back <@' + message.author.id + '>! AFK removed.').catch(() => {});
-    }
-});
-
 // ==================== DM COMMANDS (FALLBACK) ====================
-// Lets customers get the UPI scanner in DMs instantly,
-// even if slash commands haven't synced yet.
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     if (message.guild) return; // only handle DMs here
-
+    
     const text = message.content.trim().toLowerCase();
-
+    
     // Respond to: upi, /upi, pay, payment, scanner
     if (/^(upi|[/]upi|pay|payment|scanner|qr)[ !.]?.*$/i.test(text)) {
         const { embed, file } = await upiEmbed(config.upiId, null, null, null);
@@ -1988,28 +1573,43 @@ client.on('messageCreate', async (message) => {
         await message.channel.send(payload);
         return;
     }
-
-    // FIX: Remove DM vouch auto-detection - too many false positives
-    // "I bought coffee today" would be logged as a vouch for the store owner
+    
+    // If DM was a vouch-style message from a buyer, log it like in #vouches
+    const vouchKeywords = /(?:legit|rep|bought|vouch|purchased|trusted|positive)/i;
+    if (vouchKeywords.test(text)) {
+        // Load vouches for the store owner as seller
+        const sellerId = config.ownerId;
+        const vouches = loadData('vouches.json');
+        if (!vouches[sellerId]) vouches[sellerId] = { count: 0, reviews: [] };
+        vouches[sellerId].count++;
+        vouches[sellerId].reviews.push({
+            from: message.author.id,
+            fromTag: message.author.tag,
+            product: 'DM vouch',
+            review: message.content,
+            date: new Date().toISOString()
+        });
+        saveData('vouches.json', vouches);
+        await message.channel.send('⭐ Vouch recorded! Thanks for trusting ' + STORE_NAME + '!');
+    }
 });
 
 // ==================== LEVELING + ANTI-SCAM ====================
 client.on('messageCreate', async (message) => {
-    if (message.author.bot) return;
-    if (!message.guild) return; // guild only
-
+    if (message.author.bot || !message.guild) return;
+    
     // ANTI-SCAM: check every message
     if (await antiScamCheck(message)) {
         try {
             await message.delete();
-            const warn = await message.channel.send(` <@${message.author.id}> that message looked like a scam link and was deleted. If this is a mistake, message staff!`);
+            const warn = await message.channel.send(`⚠️ <@${message.author.id}> that message looked like a scam link and was deleted. If this is a mistake, message staff!`);
             setTimeout(() => warn.delete().catch(() => {}), 8000);
             // Log to ticket-logs
             const logChannel = message.guild.channels.cache.find(c => c.name === 'ticket-logs');
             if (logChannel) {
                 const logEmbed = new EmbedBuilder()
-                    .setTitle(' Scam Attempt Blocked')
-                    .setDescription(`**User:** <@${message.author.id}>\n**Channel:** <#${message.channel.id}>\n**Message:** ` + '`' + message.content.slice(0, 300) + '`')
+                    .setTitle('🛡️ Scam Attempt Blocked')
+                    .setDescription(`**User:** <@${message.author.id}>/n**Channel:** <#${message.channel.id}>/n**Message:** ` + '`' + message.content.slice(0, 300) + '`')
                     .setColor('#FF0000')
                     .setTimestamp();
                 await logChannel.send({ embeds: [logEmbed] });
@@ -2017,44 +1617,41 @@ client.on('messageCreate', async (message) => {
         } catch (e) { /* ignore */ }
         return;
     }
-
+    
     // LEVELING: earn XP in chat channels (skip tickets/commands)
     const channelName = message.channel.name || '';
     if (/^order-|^support-|^ticket-/.test(channelName)) return;
     if (message.content.startsWith('/')) return;
     await grantXp(message.member);
 });
+
+// ==================== WELCOME ====================
 client.on('guildMemberAdd', async (member) => {
     const welcomeChannel = member.guild.channels.cache.find(c => c.name === 'welcome-back');
     if (!welcomeChannel) return;
-
+    
     const embed = new EmbedBuilder()
-        .setTitle(` Welcome, ${member.user.username}!`)
-        .setDescription(`Welcome to ${STORE_NAME}!\n\n` +
-            `**** Check our shops for the latest stock\n` +
-            `**** Trusted by 100+ customers - check our vouches in <#${member.guild.channels.cache.find(c => c.name === 'vouches')?.id || 'vouches'}>\n` +
-            `**** Every order confirmed in <#${member.guild.channels.cache.find(c => c.name === 'orders')?.id || 'orders'}>\n` +
-            `**** Chat with us in <#${member.guild.channels.cache.find(c => c.name === 'general-chat')?.id || 'general-chat'}>\n` +
-            `**** Want to buy? Create an order!\n\n` +
-            `Read the rules in <#${member.guild.channels.cache.find(c => c.name === 'rules')?.id || 'rules'}>!`)
+        .setTitle(`👋 Welcome, ${member.user.username}!`)
+        .setDescription(`Welcome to ${STORE_NAME}!/
+                **🛒** Check our shops for the latest stock/
+                **✅** Trusted vouches in #vouches/
+                **💬** Chat with us in #general-chat/
+                **🎫** Buy via order tickets!/
+                /nRead #rules first!`)
         .setThumbnail(member.user.displayAvatarURL())
-        .setImage('https://media.tenor.com/EWwYmIsWKroAAAAM/kaneki-tokyo-ghoul.gif')
         .setColor('#00C853')
         .setFooter({ text: STORE_NAME })
         .setTimestamp();
-
-    await welcomeChannel.send({ content: `Welcome <@${member.user.id}>! `, embeds: [embed] });
-
+    
+    await welcomeChannel.send({ content: `Welcome <@${member.user.id}>! 🎉`, embeds: [embed] });
+    
     // Auto-assign Member role
     const memberRole = member.guild.roles.cache.find(r => r.name === 'Member');
     if (memberRole) await member.roles.add(memberRole).catch(() => {});
 });
 
-// Login (supports env var TOKEN / DISCORD_TOKEN for cloud hosting)
-if (process.env.TOKEN || process.env.DISCORD_TOKEN) {
-    config.token = process.env.TOKEN || process.env.DISCORD_TOKEN;
-    console.log('Using token from environment variable.');
-}
+// ==================== LOGIN ====================
+if (process.env.TOKEN || process.env.DISCORD_TOKEN) config.token = process.env.TOKEN || process.env.DISCORD_TOKEN;
 if (!config.token || config.token === 'YOUR_BOT_TOKEN_HERE') {
     console.error('Please set your bot token in config.json (or TOKEN env var)!');
     process.exit(1);
