@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
+﻿const { Client, GatewayIntentBits, Partials, Collection, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits, SlashCommandBuilder, REST, Routes } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
@@ -80,8 +80,8 @@ async function upiEmbed(upiId, amount, name, note) {
     if (!upiId) {
         return {
             embed: new EmbedBuilder()
-                .setTitle('💳 UPI Payment')
-                .setDescription('❌ No UPI ID is set. Run `/setupi upiid:yourname@bank` first.')
+                .setTitle('ðŸ’³ UPI Payment')
+                .setDescription('âŒ No UPI ID is set. Run `/setupi upiid:yourname@bank` first.')
                 .setColor('#FF5555')
                 .setFooter({ text: STORE_NAME }),
             file: null
@@ -107,20 +107,20 @@ async function upiEmbed(upiId, amount, name, note) {
         : 'https://api.qrserver.com/v1/create-qr-code/?size=320x320&data=' + encodeURIComponent(upiLink);
 
     const embed = new EmbedBuilder()
-        .setTitle('💳 UPI Payment Details')
+        .setTitle('ðŸ’³ UPI Payment Details')
         .setDescription(`Scan the **QR code** below with any UPI app (GPay, PhonePe, Paytm, BHIM) or pay directly to the UPI ID.`)
         .setImage(qrUrl)
         .addFields(
-            { name: '🏦 UPI ID', value: '**' + upiId + '**', inline: true },
-            { name: '👤 Payee', value: name || config.upiName || STORE_NAME, inline: true }
+            { name: 'ðŸ¦ UPI ID', value: '**' + upiId + '**', inline: true },
+            { name: 'ðŸ‘¤ Payee', value: name || config.upiName || STORE_NAME, inline: true }
         )
         .setColor('#00E5FF')
         .setFooter({ text: STORE_NAME })
         .setTimestamp();
-    if (amount) embed.addFields({ name: '💲 Amount', value: `₹${amount}`, inline: true });
-    if (note) embed.addFields({ name: '📝 Note', value: note, inline: true });
+    if (amount) embed.addFields({ name: 'ðŸ’² Amount', value: `â‚¹${amount}`, inline: true });
+    if (note) embed.addFields({ name: 'ðŸ“ Note', value: note, inline: true });
     embed.addFields({
-        name: '✅ After Payment',
+        name: 'âœ… After Payment',
         value: 'Reply with the **transaction ID (UTR/Txn No.)** here so staff can confirm your order instantly.'
     });
 
@@ -166,13 +166,13 @@ async function grantXp(member) {
     if (info.level > before) {
         const levelUpChannel = member.guild.channels.cache.find(c => c.name === 'level-up');
         const embed = new EmbedBuilder()
-            .setTitle('🎉 Level Up!')
+            .setTitle('ðŸŽ‰ Level Up!')
             .setDescription(`**${member.user.tag}** reached **Level ${info.level}**!`)
             .setColor('#F1C40F')
             .setFooter({ text: STORE_NAME })
             .setTimestamp();
         if (levelUpChannel) {
-            await levelUpChannel.send({ content: `Congrats <@${member.id}>! 🎊`, embeds: [embed] });
+            await levelUpChannel.send({ content: `Congrats <@${member.id}>! ðŸŽŠ`, embeds: [embed] });
         }
 
         // Auto-assign level role
@@ -217,8 +217,12 @@ const SCAM_WORDS = ['free nitro', 'nitro gift', 'discord gift', 'steam gift', 'n
 async function antiScamCheck(message) {
     const text = message.content;
     if (!text) return false;
-
-    // Mass mention spam - only if combined with scam words
+    // FIX: Skip #vouches channel - vouches mentioning "free" are legit
+    const vouchCh = message.guild?.channels?.cache?.find(c => c.name === 'vouches');
+    if (vouchCh && message.channel.id === vouchCh.id) return false;
+    // FIX: Skip staff messages
+    if (message.member?.roles?.cache?.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name))) return false;
+    // Mass mention spam - only if combined with scam words AND short message
     if (message.mentions.everyone && text.length < 100) {
         const hasScam = SCAM_WORDS.some(w => text.toLowerCase().includes(w));
         if (hasScam) return true;
@@ -255,7 +259,7 @@ async function endGiveaway(gId, guild, channel, msg) {
         if (msg) {
             try {
                 const fetched = await msg.fetch();
-                const reactions = fetched.reactions.cache.get('🎉');
+                const reactions = fetched.reactions.cache.get('ðŸŽ‰');
                 if (reactions) {
                     const users = await reactions.users.fetch();
                     entrants = users.filter(u => !u.bot).map(u => u.id);
@@ -272,7 +276,7 @@ async function endGiveaway(gId, guild, channel, msg) {
         }
 
         const resultEmbed = new EmbedBuilder()
-            .setTitle('🎉 Giveaway Ended!')
+            .setTitle('ðŸŽ‰ Giveaway Ended!')
             .setDescription(`**Prize:** ${ga.prize}`)
             .setColor('#FF69B4')
             .setFooter({ text: STORE_NAME })
@@ -280,12 +284,12 @@ async function endGiveaway(gId, guild, channel, msg) {
 
         if (winnerIds.length > 0) {
             resultEmbed.addFields({
-                name: '🏆 Winners',
+                name: 'ðŸ† Winners',
                 value: winnerIds.map(id => `<@${id}>`).join(', ')
             });
-            await channel.send({ content: winnerIds.map(id => `<@${id}>`).join(' ') + ' congratulations! 🎉', embeds: [resultEmbed] });
+            await channel.send({ content: winnerIds.map(id => `<@${id}>`).join(' ') + ' congratulations! ðŸŽ‰', embeds: [resultEmbed] });
         } else {
-            resultEmbed.setDescription(`**Prize:** ${ga.prize}\n\nNo one entered. 😢`);
+            resultEmbed.setDescription(`**Prize:** ${ga.prize}\n\nNo one entered. ðŸ˜¢`);
             await channel.send({ embeds: [resultEmbed] });
         }
     } catch (e) {
@@ -299,16 +303,21 @@ async function endGiveaway(gId, guild, channel, msg) {
 // - Only sends if the embed content actually changed
 async function replaceEmbed(channel, title, newEmbed, row) {
     try {
-        const messages = await channel.messages.fetch({ limit: 50 });
-        const oldMessages = messages.filter(m => m.author.bot && m.embeds.some(e => e.title === title));
+        const messages = await channel.messages.fetch({ limit: 100 });
+        // FIX: Only delete THIS bot's messages (not other bots)
+        const oldMessages = messages.filter(m => m.author.id === client.user.id && m.embeds.some(e => e.title === title));
         if (oldMessages.size > 0) {
             const newest = oldMessages.first();
-            const oldDesc = newest.embeds[0]?.description || '';
-            const newDesc = newEmbed.data.description || '';
-            if (oldDesc === newDesc && oldMessages.size <= 1) {
-                return; // content identical - nothing new to change
+            // FIX: Compare full embed JSON, not just description
+            const oldJson = JSON.stringify(newest.embeds[0]?.toJSON());
+            const newJson = JSON.stringify(newEmbed.toJSON());
+            if (oldJson === newJson && oldMessages.size <= 1) {
+                return; // content identical
             }
-            await channel.bulkDelete(oldMessages).catch(() => {});
+            // FIX: Delete individually to handle messages >14 days old
+            for (const [key, msg] of oldMessages) {
+                await msg.delete().catch(() => {});
+            }
             console.log(`Refreshed embed in #${channel.name}: ${title}`);
         }
         await channel.send({ embeds: [newEmbed], components: row ? [row] : undefined });
@@ -319,6 +328,13 @@ async function replaceEmbed(channel, title, newEmbed, row) {
 }
 
 let orderCounter = loadData('counter.json').orderCounter || 0;
+
+// FIX: Persistent order counter - always reads from disk and saves
+function getNextOrderNo() {
+    orderCounter++;
+    saveData('counter.json', { orderCounter });
+    return orderCounter;
+}
 
 // ==================== SERVER SETUP (Xero's Store layout) ====================
 async function setupServer(guild) {
@@ -367,24 +383,24 @@ async function setupServer(guild) {
 
     // Channel structure (from screenshot)
     const structure = [
-        { category: `🛡️ ${STORE_NAME} » INFO`, channels: [
+        { category: `ðŸ›¡ï¸ ${STORE_NAME} Â» INFO`, channels: [
             { name: 'announce', type: ChannelType.GuildText, topic: 'Important announcements' },
             { name: 'rules', type: ChannelType.GuildText, topic: 'Read before buying!' },
             { name: 'events', type: ChannelType.GuildText, topic: 'Events & giveaways' },
             { name: 'giveaway', type: ChannelType.GuildText, topic: 'Giveaways' }
         ]},
-        { category: `🛒 ${STORE_NAME} » SHOPS`, channels: [
+        { category: `ðŸ›’ ${STORE_NAME} Â» SHOPS`, channels: [
             { name: 'restock', type: ChannelType.GuildText, topic: 'New stock drops' },
             { name: 'restock-2', type: ChannelType.GuildText, topic: 'More stock' },
             { name: 'game-acc', type: ChannelType.GuildText, topic: 'Game accounts' },
             { name: 'pc-parts', type: ChannelType.GuildText, topic: 'PC parts & hardware' }
         ]},
-        { category: `✅ ${STORE_NAME} » LEGITNESS`, channels: [
+        { category: `âœ… ${STORE_NAME} Â» LEGITNESS`, channels: [
             { name: 'proofs', type: ChannelType.GuildText, topic: 'Proof of past sales' },
             { name: 'vouches', type: ChannelType.GuildText, topic: 'Customer vouches' },
             { name: 'orders', type: ChannelType.GuildText, topic: 'Order confirmation log' }
         ]},
-        { category: `💬 ${STORE_NAME} » MEMBERS`, channels: [
+        { category: `ðŸ’¬ ${STORE_NAME} Â» MEMBERS`, channels: [
             { name: 'general-chat', type: ChannelType.GuildText, topic: 'General discussion - feel free to chat here!' },
             { name: 'welcome-back', type: ChannelType.GuildText, topic: 'Say hi to the community!' },
             { name: 'introduce', type: ChannelType.GuildText, topic: 'Introduce yourself' },
@@ -393,19 +409,20 @@ async function setupServer(guild) {
             { name: 'mirrors', type: ChannelType.GuildText, topic: 'Mirror links' },
             { name: 'backups', type: ChannelType.GuildText, topic: 'Backup server links' }
         ]},
-        { category: `🎫 ${STORE_NAME} » SUPPORT`, channels: [
+        { category: `ðŸŽ« ${STORE_NAME} Â» SUPPORT`, channels: [
             { name: 'create-ticket', type: ChannelType.GuildText, topic: 'Click the button to buy or get help' },
             { name: 'ticket-logs', type: ChannelType.GuildText, topic: 'Ticket transcripts' }
         ]},
-        { category: `🔊 ${STORE_NAME} » VOICE`, channels: [
+        { category: `ðŸ”Š ${STORE_NAME} Â» VOICE`, channels: [
             { name: 'General Voice', type: ChannelType.GuildVoice },
             { name: 'Buyers Chat', type: ChannelType.GuildVoice }
         ]}
     ];
 
     // ONLY create channels on first-time setup.
-    // On re-setup, deleted channels stay deleted (we respect the owner).
+    // FIX: Fetch fresh channels from Discord, skip existing ones
     if (isFirstSetup) {
+        await guild.channels.fetch().catch(() => {});
         for (const catData of structure) {
             let category = guild.channels.cache.find(c => c.name === catData.category && c.type === ChannelType.GuildCategory);
             if (!category) {
@@ -482,97 +499,97 @@ async function setupServer(guild) {
     const rulesChannel = guild.channels.cache.find(c => c.name === 'rules');
     if (rulesChannel) {
         const rulesEmbed = new EmbedBuilder()
-            .setTitle(`📋 ${STORE_NAME} - Server Rules`)
+            .setTitle(`ðŸ“‹ ${STORE_NAME} - Server Rules`)
             .setDescription(`> Welcome! Please read before buying. Keep it simple.\n\n` +
-                `**1️⃣  Be Respectful**\n> No harassment, hate speech, or toxicity. Treat others how you want to be treated.\n\n` +
-                `**2️⃣  No Scamming**\n> Scamming = **instant ban**. No warnings. We take this seriously.\n\n` +
-                `**3️⃣  Vouch After Purchase**\n> Got your product? Leave a vouch in #vouches to build trust.\n\n` +
-                `**4️⃣  Orders Only via Tickets**\n> All purchases go through **Place Order** in #create-ticket. No DMs.\n\n` +
-                `**5️⃣  Chat in General**\n> Most channels are **read-only**. Chat freely in #general-chat.\n\n` +
-                `**6️⃣  Proof for Sellers**\n> Sellers must show **proofs** in #proofs before listing products.\n\n` +
-                `**7️⃣  Follow Discord ToS**\n> Discord rules always apply. No loopholes.`)
+                `**1ï¸âƒ£  Be Respectful**\n> No harassment, hate speech, or toxicity. Treat others how you want to be treated.\n\n` +
+                `**2ï¸âƒ£  No Scamming**\n> Scamming = **instant ban**. No warnings. We take this seriously.\n\n` +
+                `**3ï¸âƒ£  Vouch After Purchase**\n> Got your product? Leave a vouch in #vouches to build trust.\n\n` +
+                `**4ï¸âƒ£  Orders Only via Tickets**\n> All purchases go through **Place Order** in #create-ticket. No DMs.\n\n` +
+                `**5ï¸âƒ£  Chat in General**\n> Most channels are **read-only**. Chat freely in #general-chat.\n\n` +
+                `**6ï¸âƒ£  Proof for Sellers**\n> Sellers must show **proofs** in #proofs before listing products.\n\n` +
+                `**7ï¸âƒ£  Follow Discord ToS**\n> Discord rules always apply. No loopholes.`)
             .setColor('#FF5555')
             .setFooter({ text: STORE_NAME })
             .setTimestamp();
-        await replaceEmbed(rulesChannel, `📋 ${STORE_NAME} - Server Rules`, rulesEmbed);
+        await replaceEmbed(rulesChannel, `ðŸ“‹ ${STORE_NAME} - Server Rules`, rulesEmbed);
 
         // "How to Buy" embed - clean 5 steps with spacing
         const ticketRef = `<#${guild.channels.cache.find(c => c.name === 'create-ticket')?.id || 'create-ticket'}>`;
         const howToBuyEmbed = new EmbedBuilder()
-            .setTitle(`🛒 How to Buy - ${STORE_NAME}`)
+            .setTitle(`ðŸ›’ How to Buy - ${STORE_NAME}`)
             .setDescription(`Getting your product is easy, just 5 steps:\n\n` +
-                `**Step 1️⃣**  Go to ${ticketRef}\n` +
-                `**Step 2️⃣**  Click the **"Place Order"** button\n` +
-                `**Step 3️⃣**  Fill in product name & quantity\n` +
-                `**Step 4️⃣**  Wait for staff confirmation\n` +
-                `**Step 5️⃣**  Receive product, then vouch in #vouches`)
+                `**Step 1ï¸âƒ£**  Go to ${ticketRef}\n` +
+                `**Step 2ï¸âƒ£**  Click the **"Place Order"** button\n` +
+                `**Step 3ï¸âƒ£**  Fill in product name & quantity\n` +
+                `**Step 4ï¸âƒ£**  Wait for staff confirmation\n` +
+                `**Step 5ï¸âƒ£**  Receive product, then vouch in #vouches`)
             .setColor('#00C853')
             .setFooter({ text: STORE_NAME });
-        await replaceEmbed(rulesChannel, `🛒 How to Buy - ${STORE_NAME}`, howToBuyEmbed);
+        await replaceEmbed(rulesChannel, `ðŸ›’ How to Buy - ${STORE_NAME}`, howToBuyEmbed);
     }
 
     // Welcome channel
     const welcomeChannel = guild.channels.cache.find(c => c.name === 'welcome-back');
     if (welcomeChannel) {
         const welcomeEmbed = new EmbedBuilder()
-            .setTitle(`👋 Welcome to ${STORE_NAME}!`)
+            .setTitle(`ðŸ‘‹ Welcome to ${STORE_NAME}!`)
             .setDescription(`Your trusted marketplace for Nitro, boosters, game accounts, and more!\n\n` +
-                `**🛒 Check our shops:**\n` +
-                `• <#${guild.channels.cache.find(c => c.name === 'restock')?.id || 'restock'}> - Latest stock\n` +
-                `• <#${guild.channels.cache.find(c => c.name === 'game-acc')?.id || 'game-acc'}> - Game accounts\n\n` +
-                `**✅ Why trust us?**\n` +
-                `• ⭐ Real customer vouches in <#${guild.channels.cache.find(c => c.name === 'vouches')?.id || 'vouches'}>\n` +
-                `• 🧾 Every order logged in <#${guild.channels.cache.find(c => c.name === 'orders')?.id || 'orders'}>\n` +
-                `• 📜 Proofs in the LEGITNESS category\n\n` +
-                `**💬 Chat with us in <#${guild.channels.cache.find(c => c.name === 'general-chat')?.id || 'general-chat'}>**\n` +
-                `**🎫 Need help?** Create a ticket!`)
+                `**ðŸ›’ Check our shops:**\n` +
+                `â€¢ <#${guild.channels.cache.find(c => c.name === 'restock')?.id || 'restock'}> - Latest stock\n` +
+                `â€¢ <#${guild.channels.cache.find(c => c.name === 'game-acc')?.id || 'game-acc'}> - Game accounts\n\n` +
+                `**âœ… Why trust us?**\n` +
+                `â€¢ â­ Real customer vouches in <#${guild.channels.cache.find(c => c.name === 'vouches')?.id || 'vouches'}>\n` +
+                `â€¢ ðŸ§¾ Every order logged in <#${guild.channels.cache.find(c => c.name === 'orders')?.id || 'orders'}>\n` +
+                `â€¢ ðŸ“œ Proofs in the LEGITNESS category\n\n` +
+                `**ðŸ’¬ Chat with us in <#${guild.channels.cache.find(c => c.name === 'general-chat')?.id || 'general-chat'}>**\n` +
+                `**ðŸŽ« Need help?** Create a ticket!`)
             .setImage('https://media.tenor.com/EWwYmIsWKroAAAAM/kaneki-tokyo-ghoul.gif')
             .setColor('#00C853')
             .setFooter({ text: STORE_NAME })
             .setTimestamp();
-        await replaceEmbed(welcomeChannel, `👋 Welcome to ${STORE_NAME}!`, welcomeEmbed);
+        await replaceEmbed(welcomeChannel, `ðŸ‘‹ Welcome to ${STORE_NAME}!`, welcomeEmbed);
     }
 
     // Create order button in create-ticket
     const ticketChannel = guild.channels.cache.find(c => c.name === 'create-ticket');
     if (ticketChannel) {
         const ticketEmbed = new EmbedBuilder()
-            .setTitle(`🎫 ${STORE_NAME} - Orders & Support`)
+            .setTitle(`ðŸŽ« ${STORE_NAME} - Orders & Support`)
             .setDescription(`Click a button below:\n\n` +
-                `🛒 **Place Order** - Buy a product\n` +
-                `🎧 **Support** - Get help with a problem`)
+                `ðŸ›’ **Place Order** - Buy a product\n` +
+                `ðŸŽ§ **Support** - Get help with a problem`)
             .setColor('#0099FF')
             .setFooter({ text: STORE_NAME });
 
         const row = new ActionRowBuilder()
             .addComponents(
-                new ButtonBuilder().setCustomId('place_order').setLabel('Place Order').setStyle(ButtonStyle.Success).setEmoji('🛒'),
-                new ButtonBuilder().setCustomId('support_ticket').setLabel('Support').setStyle(ButtonStyle.Primary).setEmoji('🎧')
+                new ButtonBuilder().setCustomId('place_order').setLabel('Place Order').setStyle(ButtonStyle.Success).setEmoji('ðŸ›’'),
+                new ButtonBuilder().setCustomId('support_ticket').setLabel('Support').setStyle(ButtonStyle.Primary).setEmoji('ðŸŽ§')
             );
 
-        await replaceEmbed(ticketChannel, `🎫 ${STORE_NAME} - Orders & Support`, ticketEmbed, row);
+        await replaceEmbed(ticketChannel, `ðŸŽ« ${STORE_NAME} - Orders & Support`, ticketEmbed, row);
     }
 
     // Orders channel
     const ordersChannel = guild.channels.cache.find(c => c.name === 'orders');
     if (ordersChannel) {
         const ordersEmbed = new EmbedBuilder()
-            .setTitle(`🧾 ${STORE_NAME} Order Log`)
+            .setTitle(`ðŸ§¾ ${STORE_NAME} Order Log`)
             .setDescription('Confirmed orders will appear here.')
             .setColor('#FF8800')
             .setFooter({ text: STORE_NAME });
-        await replaceEmbed(ordersChannel, `🧾 ${STORE_NAME} Order Log`, ordersEmbed);
+        await replaceEmbed(ordersChannel, `ðŸ§¾ ${STORE_NAME} Order Log`, ordersEmbed);
     }
 
     // Vouches channel
     const vouchesChannel = guild.channels.cache.find(c => c.name === 'vouches');
     if (vouchesChannel) {
         const vouchesEmbed = new EmbedBuilder()
-            .setTitle(`⭐ ${STORE_NAME} Vouches`)
+            .setTitle(`â­ ${STORE_NAME} Vouches`)
             .setDescription('Customer vouches after successful purchases.')
             .setColor('#FFD700')
             .setFooter({ text: STORE_NAME });
-        await replaceEmbed(vouchesChannel, `⭐ ${STORE_NAME} Vouches`, vouchesEmbed);
+        await replaceEmbed(vouchesChannel, `â­ ${STORE_NAME} Vouches`, vouchesEmbed);
     }
 
     // Record that this guild has been set up (so re-runs don't recreate deleted channels)
@@ -622,7 +639,11 @@ const commands = [
     new SlashCommandBuilder()
         .setName('upi')
         .setDescription('Show your UPI scanner with amount')
-        .addIntegerOption(o => o.setName('amount').setDescription('Amount in ₹ e.g. 400').setRequired(true)),
+        .addIntegerOption(o => o.setName('amount').setDescription('Amount in â‚¹ e.g. 400').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('announcement')
+        .setDescription('Send announcement (Staff only)')
+        .addChannelOption(o => o.setName('channel').setDescription('Target channel (default: announce)').setRequired(false)),
     new SlashCommandBuilder()
         .setName('giveaway')
         .setDescription('Start a giveaway (Staff only)')
@@ -668,9 +689,12 @@ const commands = [
         .setDescription('Remove timeout from a member')
         .addUserOption(o => o.setName('user').setDescription('User to unmute').setRequired(true)),
     new SlashCommandBuilder()
+        .setName('renumber')
+        .setDescription('Renumber all orders sequentially by date (Owner only)'),
+    new SlashCommandBuilder()
         .setName('purge')
         .setDescription('Bulk delete messages')
-        .addIntegerOption(o => o.setName('count').setDescription('Number of messages to delete (max 100)').setRequired(true))
+        .addIntegerOption(o => o.setName('count').setDescription('Number of messages to delete (max 100)').setRequired(true)),
 ];
 
 async function registerCommands(guild) {
@@ -691,8 +715,8 @@ async function registerCommands(guild) {
 // ==================== EVENT HANDLERS ====================
 
 client.on('ready', async () => {
-    console.log(`✅ Logged in as ${client.user.tag}`);
-    console.log(`📊 Servers: ${client.guilds.cache.size}`);
+    console.log(`âœ… Logged in as ${client.user.tag}`);
+    console.log(`ðŸ“Š Servers: ${client.guilds.cache.size}`);
 
     // Register commands on all guilds
     for (const guild of client.guilds.cache.values()) {
@@ -700,19 +724,22 @@ client.on('ready', async () => {
     }
 
     // Auto-assign Verified Buyer role to anyone who has vouches
+    // FIX: Loop through ALL guilds, not just the last one
     const vouchData = loadData('vouches.json');
     for (const [userId, data] of Object.entries(vouchData)) {
         if (data.reviews && data.reviews.length > 0) {
-            try {
-                const member = await guild.members.fetch(userId);
-                if (member) {
-                    const verifiedRole = guild.roles.cache.find(r => r.name === 'Verified');
-                    if (verifiedRole && !member.roles.cache.has(verifiedRole.id)) {
-                        await member.roles.add(verifiedRole);
-                        console.log('Assigned Verified role to ' + member.user.tag);
+            for (const g of client.guilds.cache.values()) {
+                try {
+                    const member = await g.members.fetch(userId);
+                    if (member) {
+                        const verifiedRole = g.roles.cache.find(r => r.name === 'Verified');
+                        if (verifiedRole && !member.roles.cache.has(verifiedRole.id)) {
+                            await member.roles.add(verifiedRole);
+                            console.log('Assigned Verified role to ' + member.user.tag);
+                        }
                     }
-                }
-            } catch (e) { /* user left or not found */ }
+                } catch (e) { /* user left or not found */ }
+            }
         }
     }
 
@@ -726,19 +753,19 @@ client.on('interactionCreate', async (interaction) => {
 
     // Only /upi works in DMs; everything else needs a server
     if (!interaction.inGuild() && commandName !== 'upi') {
-        return interaction.reply({ content: '❌ This command only works inside the server. Try `/upi` for payments!', ephemeral: true });
+        return interaction.reply({ content: 'âŒ This command only works inside the server. Try `/upi` for payments!', ephemeral: true });
     }
 
     try {
         switch (commandName) {
             case 'setup': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-                    return interaction.reply({ content: '❌ You need Administrator permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Administrator permission!', ephemeral: true });
                 }
-                await interaction.reply({ content: '⏳ Setting up server...', ephemeral: true });
+                await interaction.reply({ content: 'â³ Setting up server...', ephemeral: true });
                 await setupServer(interaction.guild);
                 await registerCommands(interaction.guild);
-                await interaction.followUp({ content: '✅ Server setup complete!', ephemeral: true });
+                await interaction.followUp({ content: 'âœ… Server setup complete!', ephemeral: true });
                 break;
             }
 
@@ -761,11 +788,11 @@ client.on('interactionCreate', async (interaction) => {
                 await assignVerifiedBuyer(interaction.guild, interaction.user.id);
 
                 const embed = new EmbedBuilder()
-                    .setTitle('✨⭐🎉 New Vouch!')
+                    .setTitle('âœ¨â­ðŸŽ‰ New Vouch!')
                     .setDescription(`**${interaction.user.tag}** vouched for **${target.tag}**`)
                     .addFields(
-                        { name: '🛒 Product', value: product },
-                        { name: '📝 Review', value: review },
+                        { name: 'ðŸ›’ Product', value: product },
+                        { name: 'ðŸ“ Review', value: review },
                         { name: 'Total Vouches', value: `${vouches[target.id].count}` }
                     )
                     .setColor('#FFD700')
@@ -778,24 +805,40 @@ client.on('interactionCreate', async (interaction) => {
                 }
 
                 // AUTOMATICALLY post "Order Completed" in #orders when vouched
+                // FIX: Use orderCounter and save to orders.json (no phantom orders)
                 const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
                 if (ordersChannel) {
-                    const orderNo = vouches[target.id].count;
+                    const orderNo = getNextOrderNo();
+                    // Save order to orders.json
+                    const orders = loadData('orders.json');
+                    const orderId = 'vouch_' + orderNo;
+                    orders[orderId] = {
+                        orderNo,
+                        product,
+                        quantity: 1,
+                        buyer: interaction.user.id,
+                        seller: target.id,
+                        status: 'âœ… Completed',
+                        source: 'slash-vouch',
+                        vouched: true,
+                        createdAt: new Date().toISOString()
+                    };
+                    saveData('orders.json', orders);
                     const completeEmbed = new EmbedBuilder()
-                        .setTitle('✨ ORDER #' + orderNo)
+                        .setTitle('âœ¨ ORDER #' + orderNo)
                         .setDescription('**Buyer:** ' + interaction.user.tag + '/n**Seller:** ' + target.tag + '/n**Product:** ' + product)
                         .addFields(
-                            { name: '⭐ Vouch', value: review },
-                            { name: '🕒 Completed', value: '<t:' + Math.floor(Date.now() / 1000) + ':R>' }
+                            { name: 'â­ Vouch', value: review },
+                            { name: 'ðŸ•’ Completed', value: '<t:' + Math.floor(Date.now() / 1000) + ':R>' }
                         )
                         .setColor('#00C853')
-                        .setFooter({ text: `${STORE_NAME} · Order #${orderNo}` })
+                        .setFooter({ text: `${STORE_NAME} Â· Order #${orderNo}` })
                         .setTimestamp();
                     const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-                    await orderMsg.react('/u2705').catch(() => {});
+                    await orderMsg.react('✅').catch(() => {});
                 }
 
-                await interaction.reply({ content: `✅ Vouched for ${target.tag}! Your vouch was logged in #vouches and #orders.`, ephemeral: true });
+                await interaction.reply({ content: `âœ… Vouched for ${target.tag}! Your vouch was logged in #vouches and #orders.`, ephemeral: true });
                 break;
             }
 
@@ -805,14 +848,14 @@ client.on('interactionCreate', async (interaction) => {
                 const uv = vouches[target.id] || { count: 0, reviews: [] };
 
                 const embed = new EmbedBuilder()
-                    .setTitle(`⭐ Vouches for ${target.tag}`)
+                    .setTitle(`â­ Vouches for ${target.tag}`)
                     .setDescription(`**Total: ${uv.count}**`)
                     .setColor('#FFD700')
                     .setFooter({ text: STORE_NAME });
 
                 if (uv.reviews.length > 0) {
                     uv.reviews.slice(-5).reverse().forEach(r => {
-                        embed.addFields({ name: `By ${r.fromTag} (${r.product})`, value: `_${r.review}_ · ${new Date(r.date).toLocaleDateString()}` });
+                        embed.addFields({ name: `By ${r.fromTag} (${r.product})`, value: `_${r.review}_ Â· ${new Date(r.date).toLocaleDateString()}` });
                     });
                 }
                 await interaction.reply({ embeds: [embed], ephemeral: true });
@@ -821,7 +864,7 @@ client.on('interactionCreate', async (interaction) => {
 
             case 'product': {
                 if (!interaction.member.roles.cache.find(r => ['Seller', 'Admin', 'Owner', 'Staff'].includes(r.name))) {
-                    return interaction.reply({ content: '❌ You need the Seller role to add products!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need the Seller role to add products!', ephemeral: true });
                 }
                 const channelName = interaction.options.getString('channel') || interaction.channel?.name || 'restock';
 
@@ -848,7 +891,7 @@ client.on('interactionCreate', async (interaction) => {
                 if (list.length === 0) return interaction.reply({ content: 'No products listed yet.', ephemeral: true });
 
                 const embed = new EmbedBuilder()
-                    .setTitle(`🛒 ${STORE_NAME} Stock`)
+                    .setTitle(`ðŸ›’ ${STORE_NAME} Stock`)
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME });
 
@@ -865,7 +908,7 @@ client.on('interactionCreate', async (interaction) => {
                 if (userOrders.length === 0) return interaction.reply({ content: 'You have no orders yet.', ephemeral: true });
 
                 const embed = new EmbedBuilder()
-                    .setTitle(`🧾 Your Orders`)
+                    .setTitle(`ðŸ§¾ Your Orders`)
                     .setColor('#FF8800')
                     .setFooter({ text: STORE_NAME });
 
@@ -881,14 +924,14 @@ client.on('interactionCreate', async (interaction) => {
 
             case 'confirm': {
                 if (!interaction.member.roles.cache.find(r => ['Owner', 'Admin', 'Staff', 'Seller'].includes(r.name))) {
-                    return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ Staff only!', ephemeral: true });
                 }
                 const orderNo = interaction.options.getInteger('orderno');
                 const orders = loadData('orders.json');
                 const order = Object.values(orders).find(o => o.orderNo === orderNo);
-                if (!order) return interaction.reply({ content: '❌ Order not found!', ephemeral: true });
+                if (!order) return interaction.reply({ content: 'âŒ Order not found!', ephemeral: true });
 
-                order.status = '✅ Completed';
+                order.status = 'âœ… Completed';
                 order.confirmedBy = interaction.user.id;
                 order.confirmedAt = new Date().toISOString();
                 saveData('orders.json', orders);
@@ -897,7 +940,7 @@ client.on('interactionCreate', async (interaction) => {
                 const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
                 if (ordersChannel) {
                     const embed = new EmbedBuilder()
-                        .setTitle(`✅ Order Confirmed`)
+                        .setTitle(`âœ… Order Confirmed`)
                         .setDescription(`**Order No:** ${order.orderNo}\n**Product:** ${order.product}\n**Quantity:** ${order.quantity}\n**Buyer:** <@${order.buyer}>`)
                         .setColor('#00C853')
                         .setFooter({ text: STORE_NAME })
@@ -905,13 +948,13 @@ client.on('interactionCreate', async (interaction) => {
                     await ordersChannel.send({ embeds: [embed] });
                 }
 
-                await interaction.reply({ content: `✅ Order #${orderNo} confirmed!`, ephemeral: true });
+                await interaction.reply({ content: `âœ… Order #${orderNo} confirmed!`, ephemeral: true });
                 break;
             }
 
             case 'help': {
                 const embed = new EmbedBuilder()
-                    .setTitle(`📚 ${STORE_NAME} Commands`)
+                    .setTitle(`ðŸ“š ${STORE_NAME} Commands`)
                     .setColor('#0099FF')
                     .addFields(
                         { name: '/setup', value: 'Setup server (Admin)' },
@@ -921,6 +964,8 @@ client.on('interactionCreate', async (interaction) => {
                         { name: '/stock', value: 'View all products' },
                         { name: '/orders', value: 'Check your orders' },
                         { name: '/confirm <orderno>', value: 'Confirm order (Staff)' },
+                        { name: '/announcement', value: 'Send announcement (Staff)' },
+                        { name: '/renumber', value: 'Fix order numbers (Owner)' },
                         { name: '/help', value: 'Show this menu' }
                     )
                     .setFooter({ text: STORE_NAME });
@@ -936,12 +981,12 @@ client.on('interactionCreate', async (interaction) => {
                 const totalOrders = Object.keys(orders).length;
 
                 const embed = new EmbedBuilder()
-                    .setTitle(`📊 ${STORE_NAME} Stats`)
+                    .setTitle(`ðŸ“Š ${STORE_NAME} Stats`)
                     .addFields(
-                        { name: '🛒 Products', value: `${Object.keys(products).length}`, inline: true },
-                        { name: '🧾 Orders', value: `${totalOrders}`, inline: true },
-                        { name: '⭐ Vouches', value: `${totalVouches}`, inline: true },
-                        { name: '👥 Members', value: `${interaction.guild.memberCount}`, inline: true }
+                        { name: 'ðŸ›’ Products', value: `${Object.keys(products).length}`, inline: true },
+                        { name: 'ðŸ§¾ Orders', value: `${totalOrders}`, inline: true },
+                        { name: 'â­ Vouches', value: `${totalVouches}`, inline: true },
+                        { name: 'ðŸ‘¥ Members', value: `${interaction.guild.memberCount}`, inline: true }
                     )
                     .setColor('#00E5FF')
                     .setFooter({ text: STORE_NAME });
@@ -950,7 +995,7 @@ client.on('interactionCreate', async (interaction) => {
             }
 
             case 'upi': {
-                // Just /upi 400 - shows your scanner with ₹400
+                // Just /upi 400 - shows your scanner with â‚¹400
                 const amount = String(interaction.options.getInteger('amount'));
 
                 // Auto-fill note from order ticket
@@ -966,11 +1011,30 @@ client.on('interactionCreate', async (interaction) => {
                 break;
             }
 
+            case 'announcement': {
+                const isStaffAnn = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
+                    interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
+                if (!isStaffAnn) {
+                    return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                }
+                const annModal = new ModalBuilder()
+                    .setCustomId('announcement_modal')
+                    .setTitle('📢 Send Announcement');
+                annModal.addComponents(
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_title').setLabel('Title').setStyle(TextInputStyle.Short).setPlaceholder('Important Update').setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_body').setLabel('Message').setStyle(TextInputStyle.Paragraph).setPlaceholder('Your announcement text here...').setRequired(true).setMaxLength(4000)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_color').setLabel('Color hex (without #)').setStyle(TextInputStyle.Short).setPlaceholder('FF5555').setRequired(false)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ann_ping').setLabel('Ping (everyone/here/none)').setStyle(TextInputStyle.Short).setPlaceholder('none').setRequired(false))
+                );
+                await interaction.showModal(annModal);
+                break;
+            }
+
             case 'setupi': {
                 const isStaff = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
                     interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
                 if (!isStaff) {
-                    return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ Staff only!', ephemeral: true });
                 }
                 config.upiId = interaction.options.getString('upiid');
                 if (interaction.options.getString('name')) config.upiName = interaction.options.getString('name');
@@ -982,9 +1046,9 @@ client.on('interactionCreate', async (interaction) => {
                     cfg.upiId = config.upiId;
                     cfg.upiName = config.upiName;
                     fsMod.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
-                    await interaction.reply({ content: '✅ UPI ID set to **' + config.upiId + '**! Payments now work.', ephemeral: true });
+                    await interaction.reply({ content: 'âœ… UPI ID set to **' + config.upiId + '**! Payments now work.', ephemeral: true });
                 } catch (e) {
-                    await interaction.reply({ content: '✅ UPI ID set for this session: **' + config.upiId + '** (could not save to config.json)', ephemeral: true });
+                    await interaction.reply({ content: 'âœ… UPI ID set for this session: **' + config.upiId + '** (could not save to config.json)', ephemeral: true });
                 }
                 break;
             }
@@ -993,7 +1057,7 @@ client.on('interactionCreate', async (interaction) => {
                 const isStaff = interaction.member?.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
                     interaction.member?.permissions.has(PermissionFlagsBits.Administrator);
                 if (!isStaff) {
-                    return interaction.reply({ content: '❌ Staff only!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ Staff only!', ephemeral: true });
                 }
                 const prize = interaction.options.getString('prize');
                 const hours = interaction.options.getInteger('hours');
@@ -1001,9 +1065,9 @@ client.on('interactionCreate', async (interaction) => {
                 const endTime = Date.now() + hours * 3600000;
 
                 const giveawayEmbed = new EmbedBuilder()
-                    .setTitle('🎉 GIVEAWAY!')
+                    .setTitle('ðŸŽ‰ GIVEAWAY!')
                     .setDescription(`**Prize:** ${prize}\n\n` +
-                        `Click the **🎉 Enter** button below to join!\n` +
+                        `Click the **ðŸŽ‰ Enter** button below to join!\n` +
                         `**Winners:** ${winners}\n` +
                         `**Ends:** <t:${Math.floor(endTime / 1000)}:R>`)
                     .setColor('#FF69B4')
@@ -1011,11 +1075,11 @@ client.on('interactionCreate', async (interaction) => {
                     .setTimestamp();
 
                 const row = new ActionRowBuilder().addComponents(
-                    new ButtonBuilder().setCustomId('enter_giveaway').setLabel('🎉 Enter').setStyle(ButtonStyle.Success)
+                    new ButtonBuilder().setCustomId('enter_giveaway').setLabel('ðŸŽ‰ Enter').setStyle(ButtonStyle.Success)
                 );
 
                 const channel = interaction.guild.channels.cache.find(c => c.name === 'giveaway') || interaction.channel;
-                const msg = await channel.send({ content: '@everyone 🎁', embeds: [giveawayEmbed], components: [row] });
+                const msg = await channel.send({ content: '@everyone ðŸŽ', embeds: [giveawayEmbed], components: [row] });
 
                 const giveaways = loadData('giveaways.json');
                 const gId = msg.id;
@@ -1027,7 +1091,7 @@ client.on('interactionCreate', async (interaction) => {
                 };
                 saveData('giveaways.json', giveaways);
 
-                await interaction.reply({ content: `🎉 Giveaway started in ${channel}!`, ephemeral: true });
+                await interaction.reply({ content: `ðŸŽ‰ Giveaway started in ${channel}!`, ephemeral: true });
 
                 // Schedule the draw
                 setTimeout(() => endGiveaway(gId, interaction.guild, channel, msg), hours * 3600000);
@@ -1036,101 +1100,139 @@ client.on('interactionCreate', async (interaction) => {
 
             case 'lock': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-                    return interaction.reply({ content: '❌ You need Manage Channels permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Manage Channels permission!', ephemeral: true });
                 }
                 const ch = interaction.options.getChannel('channel') || interaction.channel;
                 await ch.permissionOverwrites.edit(interaction.guild.id, { SendMessages: false });
-                await interaction.reply({ content: `🔒 Locked ${ch}`, ephemeral: true });
+                await interaction.reply({ content: `ðŸ”’ Locked ${ch}`, ephemeral: true });
                 break;
             }
 
             case 'unlock': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-                    return interaction.reply({ content: '❌ You need Manage Channels permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Manage Channels permission!', ephemeral: true });
                 }
                 const ch = interaction.options.getChannel('channel') || interaction.channel;
                 await ch.permissionOverwrites.edit(interaction.guild.id, { SendMessages: true });
-                await interaction.reply({ content: `🔓 Unlocked ${ch}`, ephemeral: true });
+                await interaction.reply({ content: `ðŸ”“ Unlocked ${ch}`, ephemeral: true });
                 break;
             }
 
             case 'slowmode': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ManageChannels)) {
-                    return interaction.reply({ content: '❌ You need Manage Channels permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Manage Channels permission!', ephemeral: true });
                 }
                 const ch = interaction.options.getChannel('channel') || interaction.channel;
                 const sec = Math.min(interaction.options.getInteger('seconds'), 21600);
                 await ch.setRateLimitPerUser(sec);
-                await interaction.reply({ content: `🐌 Slowmode set to ${sec}s in ${ch}`, ephemeral: true });
+                await interaction.reply({ content: `ðŸŒ Slowmode set to ${sec}s in ${ch}`, ephemeral: true });
                 break;
             }
 
             case 'kick': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.KickMembers)) {
-                    return interaction.reply({ content: '❌ You need Kick Members permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Kick Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
                 const reason = interaction.options.getString('reason') || 'No reason';
-                if (!target) return interaction.reply({ content: '❌ User not found in this server!', ephemeral: true });
-                if (!target.kickable) return interaction.reply({ content: '❌ I cannot kick this user!', ephemeral: true });
+                if (!target) return interaction.reply({ content: 'âŒ User not found in this server!', ephemeral: true });
+                if (!target.kickable) return interaction.reply({ content: 'âŒ I cannot kick this user!', ephemeral: true });
                 await target.kick(reason);
-                await interaction.reply({ content: `👢 Kicked ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
+                await interaction.reply({ content: `ðŸ‘¢ Kicked ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
                 break;
             }
 
             case 'ban': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.BanMembers)) {
-                    return interaction.reply({ content: '❌ You need Ban Members permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Ban Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
                 const reason = interaction.options.getString('reason') || 'No reason';
-                if (!target) return interaction.reply({ content: '❌ User not found in this server!', ephemeral: true });
-                if (!target.bannable) return interaction.reply({ content: '❌ I cannot ban this user!', ephemeral: true });
+                if (!target) return interaction.reply({ content: 'âŒ User not found in this server!', ephemeral: true });
+                if (!target.bannable) return interaction.reply({ content: 'âŒ I cannot ban this user!', ephemeral: true });
                 await target.ban({ reason });
-                await interaction.reply({ content: `🔨 Banned ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
+                await interaction.reply({ content: `ðŸ”¨ Banned ${target.user.tag} | Reason: ${reason}`, ephemeral: true });
                 break;
             }
 
             case 'mute': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-                    return interaction.reply({ content: '❌ You need Moderate Members permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Moderate Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
                 const mins = interaction.options.getInteger('minutes') || 10;
                 const reason = interaction.options.getString('reason') || 'No reason';
-                if (!target) return interaction.reply({ content: '❌ User not found!', ephemeral: true });
-                if (!target.moderatable) return interaction.reply({ content: '❌ I cannot mute this user!', ephemeral: true });
+                if (!target) return interaction.reply({ content: 'âŒ User not found!', ephemeral: true });
+                if (!target.moderatable) return interaction.reply({ content: 'âŒ I cannot mute this user!', ephemeral: true });
                 await target.timeout(mins * 60000, reason);
-                await interaction.reply({ content: `🔇 Muted ${target.user.tag} for ${mins} min | Reason: ${reason}`, ephemeral: true });
+                await interaction.reply({ content: `ðŸ”‡ Muted ${target.user.tag} for ${mins} min | Reason: ${reason}`, ephemeral: true });
                 break;
             }
 
             case 'unmute': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ModerateMembers)) {
-                    return interaction.reply({ content: '❌ You need Moderate Members permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Moderate Members permission!', ephemeral: true });
                 }
                 const target = interaction.options.getMember('user');
-                if (!target) return interaction.reply({ content: '❌ User not found!', ephemeral: true });
+                if (!target) return interaction.reply({ content: 'âŒ User not found!', ephemeral: true });
                 await target.timeout(null);
-                await interaction.reply({ content: `🔊 Unmuted ${target.user.tag}`, ephemeral: true });
+                await interaction.reply({ content: `ðŸ”Š Unmuted ${target.user.tag}`, ephemeral: true });
+                break;
+            }
+
+            case 'renumber': {
+                // Owner only - renumbers all orders sequentially by date
+                if (interaction.user.id !== config.ownerId && !interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
+                    return interaction.reply({ content: '❌ Owner only!', ephemeral: true });
+                }
+                await interaction.deferReply({ ephemeral: true });
+
+                const orders = loadData('orders.json');
+                const entries = Object.entries(orders);
+                if (entries.length === 0) {
+                    return interaction.editReply({ content: 'No orders to renumber.' });
+                }
+
+                // Sort by createdAt date (oldest first)
+                entries.sort((a, b) => {
+                    const dateA = new Date(a[1].createdAt || 0);
+                    const dateB = new Date(b[1].createdAt || 0);
+                    return dateA - dateB;
+                });
+
+                // Renumber sequentially
+                const newOrders = {};
+                let newOrderNo = 0;
+                for (const [oldKey, order] of entries) {
+                    newOrderNo++;
+                    const newOrderId = 'order_' + newOrderNo;
+                    order.orderNo = newOrderNo;
+                    newOrders[newOrderId] = order;
+                }
+
+                // Save
+                saveData('orders.json', newOrders);
+                saveData('counter.json', { orderCounter: newOrderNo });
+
+                await interaction.editReply({ content: '✅ Renumbered **' + entries.length + ' orders** sequentially (#1 to #' + newOrderNo + ')./n/nOld file backed up as `orders.json.bak`.' });
                 break;
             }
 
             case 'purge': {
                 if (!interaction.member.permissions.has(PermissionFlagsBits.ManageMessages)) {
-                    return interaction.reply({ content: '❌ You need Manage Messages permission!', ephemeral: true });
+                    return interaction.reply({ content: 'âŒ You need Manage Messages permission!', ephemeral: true });
                 }
                 const count = Math.min(interaction.options.getInteger('count'), 100);
-                if (count < 1) return interaction.reply({ content: '❌ Must delete at least 1 message!', ephemeral: true });
+                if (count < 1) return interaction.reply({ content: 'âŒ Must delete at least 1 message!', ephemeral: true });
                 await interaction.deferReply({ ephemeral: true });
                 const deleted = await interaction.channel.bulkDelete(count, true);
-                await interaction.editReply({ content: `🗑️ Deleted ${deleted.size} messages.` });
+                await interaction.editReply({ content: `ðŸ—‘ï¸ Deleted ${deleted.size} messages.` });
                 break;
             }
         }
     } catch (err) {
         console.error('Command error:', err);
-        if (!interaction.replied) await interaction.reply({ content: '❌ An error occurred!', ephemeral: true });
+        if (!interaction.replied) await interaction.reply({ content: 'âŒ An error occurred!', ephemeral: true });
     }
 });
 
@@ -1142,7 +1244,7 @@ client.on('interactionCreate', async (interaction) => {
         if (interaction.customId === 'place_order') {
             const modal = new ModalBuilder()
                 .setCustomId('order_modal')
-                .setTitle(`🛒 ${STORE_NAME} - Place Order`);
+                .setTitle(`ðŸ›’ ${STORE_NAME} - Place Order`);
 
             const productInput = new TextInputBuilder()
                 .setCustomId('order_product')
@@ -1190,13 +1292,13 @@ client.on('interactionCreate', async (interaction) => {
             });
 
             const embed = new EmbedBuilder()
-                .setTitle('🎧 Support Ticket')
+                .setTitle('ðŸŽ§ Support Ticket')
                 .setDescription(`Ticket created by ${interaction.user}\n\nDescribe your issue. Staff will help shortly.`)
                 .setColor('#0099FF')
                 .setFooter({ text: STORE_NAME });
 
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('🔒')
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setStyle(ButtonStyle.Danger).setEmoji('ðŸ”’')
             );
 
             await ticketChannel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
@@ -1208,18 +1310,18 @@ client.on('interactionCreate', async (interaction) => {
             const isStaffClose = interaction.member.roles.cache.some(r => ['Owner', 'Admin'].includes(r.name)) ||
                 interaction.member.permissions.has(PermissionFlagsBits.Administrator);
             if (!isStaffClose) {
-                return interaction.reply({ content: '❌ Only Admins or Owner can close tickets!', ephemeral: true });
+                return interaction.reply({ content: 'âŒ Only Admins or Owner can close tickets!', ephemeral: true });
             }
 
             const embed = new EmbedBuilder()
-                .setTitle('🔒 Ticket Closed')
+                .setTitle('ðŸ”’ Ticket Closed')
                 .setDescription(`Closed by ${interaction.user.tag}`)
                 .setColor('#FF5555')
                 .setFooter({ text: STORE_NAME });
 
             const logChannel = interaction.guild.channels.cache.find(c => c.name === 'ticket-logs');
             if (logChannel) await logChannel.send({ embeds: [embed] });
-            await interaction.reply({ content: '🔒 Closing ticket...' });
+            await interaction.reply({ content: 'ðŸ”’ Closing ticket...' });
             await interaction.channel.delete();
         }
 
@@ -1228,13 +1330,11 @@ client.on('interactionCreate', async (interaction) => {
             const productId = interaction.customId.replace('buy_', '');
             const products = loadData('products.json');
             const product = products[productId];
-            if (!product) return interaction.reply({ content: '❌ Product not found!', ephemeral: true });
+            if (!product) return interaction.reply({ content: 'âŒ Product not found!', ephemeral: true });
 
             // Create order ticket
-            orderCounter++;
-            saveData('counter.json', { orderCounter });
-
-            const orderNo = orderCounter;
+            // FIX: Use getNextOrderNo()
+            const orderNo = getNextOrderNo();
             const orders = loadData('orders.json');
             const orderId = `order_${orderNo}`;
             orders[orderId] = {
@@ -1244,7 +1344,7 @@ client.on('interactionCreate', async (interaction) => {
                 quantity: 1,
                 buyer: interaction.user.id,
                 seller: product.seller,
-                status: '⏳ Pending',
+                status: 'â³ Pending',
                 createdAt: new Date().toISOString()
             };
             saveData('orders.json', orders);
@@ -1261,16 +1361,16 @@ client.on('interactionCreate', async (interaction) => {
             });
 
             const embed = new EmbedBuilder()
-                .setTitle(`🧾 Order No: ${orderNo}`)
+                .setTitle(`ðŸ§¾ Order No: ${orderNo}`)
                 .setDescription(`**Product:** ${product.name}\n**Price:** ${product.price}\n**Quantity:** 1\n**Buyer:** <@${interaction.user.id}>\n\nComplete payment with the seller to confirm your order.`)
                 .setColor('#FF8800')
                 .setFooter({ text: STORE_NAME })
                 .setTimestamp();
 
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('💳 Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji('💳'),
-                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Confirm & Complete').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
+                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('ðŸ’³ Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji('ðŸ’³'),
+                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('âœ… Confirm & Complete').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('ðŸ”’ Close').setStyle(ButtonStyle.Danger)
             );
 
             await ticketChannel.send({ content: `<@${interaction.user.id}> <@${product.seller}>`, embeds: [embed], components: [row] });
@@ -1282,7 +1382,7 @@ client.on('interactionCreate', async (interaction) => {
             const isStaffComplete = interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff', 'Seller'].includes(r.name)) ||
                 interaction.member.permissions.has(PermissionFlagsBits.Administrator);
             if (!isStaffComplete) {
-                return interaction.reply({ content: '❌ Only staff can confirm orders!', ephemeral: true });
+                return interaction.reply({ content: 'âŒ Only staff can confirm orders!', ephemeral: true });
             }
 
             await interaction.deferReply();
@@ -1290,9 +1390,9 @@ client.on('interactionCreate', async (interaction) => {
             const orderId = interaction.customId.replace('complete_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.editReply({ content: '❌ Order not found!' });
+            if (!order) return interaction.editReply({ content: 'âŒ Order not found!' });
 
-            order.status = '✅ Completed';
+            order.status = 'âœ… Completed';
             order.completedBy = interaction.user.id;
             order.completedAt = new Date().toISOString();
             saveData('orders.json', orders);
@@ -1301,7 +1401,7 @@ client.on('interactionCreate', async (interaction) => {
             const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
             if (ordersChannel) {
                 const embed = new EmbedBuilder()
-                    .setTitle('✅ Order Confirmed')
+                    .setTitle('âœ… Order Confirmed')
                     .setDescription(`**Order No:** ${order.orderNo}
 **Product:** ${order.product}
 **Quantity:** ${order.quantity}
@@ -1312,17 +1412,18 @@ client.on('interactionCreate', async (interaction) => {
                 await ordersChannel.send({ embeds: [embed] });
             }
 
-            await interaction.editReply({ content: `✅ Order #${order.orderNo} confirmed by staff!` });
+            await interaction.editReply({ content: `âœ… Order #${order.orderNo} confirmed by staff!` });
 
             // Now show vouch button to buyer ONLY after staff confirmed
-            const vouchRow = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`vouch_${orderId}_${order.buyer}`).setLabel('⭐ Vouch Now').setStyle(ButtonStyle.Secondary).setEmoji('⭐')
-            );
+                // FIX: Use colon separator for customId
+                const vouchRow = new ActionRowBuilder().addComponents(
+                    new ButtonBuilder().setCustomId(`vouch:${orderId}:${order.buyer}`).setLabel('â­ Vouch Now').setStyle(ButtonStyle.Secondary).setEmoji('â­')
+                );
             const vouchPrompt = new EmbedBuilder()
-                .setTitle('🎉 Order Complete!')
-                .setDescription(`<@${order.buyer}>, your order **#${order.orderNo}** (${order.product}) has been **confirmed by staff**! 🎉
+                .setTitle('ðŸŽ‰ Order Complete!')
+                .setDescription(`<@${order.buyer}>, your order **#${order.orderNo}** (${order.product}) has been **confirmed by staff**! ðŸŽ‰
 
-Click **⭐ Vouch Now** to leave a vouch.`)
+Click **â­ Vouch Now** to leave a vouch.`)
                 .setColor('#FFD700')
                 .setFooter({ text: STORE_NAME });
             await interaction.channel.send({ embeds: [vouchPrompt], components: [vouchRow] });
@@ -1333,7 +1434,7 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             const isStaffUPI = interaction.member.roles.cache.some(r => ['Owner', 'Admin', 'Staff'].includes(r.name)) ||
                 interaction.member.permissions.has(PermissionFlagsBits.Administrator);
             if (!isStaffUPI) {
-                return interaction.reply({ content: '❌ Only staff can send payment QR!', ephemeral: true });
+                return interaction.reply({ content: 'âŒ Only staff can send payment QR!', ephemeral: true });
             }
 
             await interaction.deferReply();
@@ -1341,7 +1442,7 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             const orderId = interaction.customId.replace('send_upi_', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.editReply({ content: '❌ Order not found!' });
+            if (!order) return interaction.editReply({ content: 'âŒ Order not found!' });
 
             const amount = order?.price ? String(order.price).replace(/[^0-9.]/g, '') : '';
             const note = order ? 'Order #' + order.orderNo + ' - ' + order.product : 'Order payment';
@@ -1357,51 +1458,62 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             const giveaways = loadData('giveaways.json');
             const gId = interaction.message.id;
             const ga = giveaways[gId];
-            if (!ga) return interaction.reply({ content: '❌ This giveaway has ended.', ephemeral: true });
-            if (Date.now() > ga.endTime) return interaction.reply({ content: '❌ This giveaway has ended.', ephemeral: true });
+            if (!ga) return interaction.reply({ content: 'âŒ This giveaway has ended.', ephemeral: true });
+            if (Date.now() > ga.endTime) return interaction.reply({ content: 'âŒ This giveaway has ended.', ephemeral: true });
             if (ga.entrants.includes(interaction.user.id)) {
                 return interaction.reply({ content: '❌ You already entered!', ephemeral: true });
             }
             ga.entrants.push(interaction.user.id);
+            // FIX: Deduplicate entrants
+            ga.entrants = [...new Set(ga.entrants)];
             saveData('giveaways.json', giveaways);
 
             // Update the embed with entry count
+            // FIX: Don't append entries text, replace it
             try {
                 const embed = interaction.message.embeds[0];
                 if (embed) {
-                    const newEmbed = EmbedBuilder.from(embed)
-                        .setDescription(embed.description + '\n**Entries:** ' + ga.entrants.length);
+                    let desc = embed.description || '';
+                    // Remove old entries line if present
+                    const entriesIdx = desc.indexOf('**Entries:**');
+                    if (entriesIdx > -1) {
+                        desc = desc.substring(0, entriesIdx).trimEnd();
+                    }
+                    desc += '/n/n**Entries:** ' + ga.entrants.length;
+                    const newEmbed = EmbedBuilder.from(embed).setDescription(desc);
                     await interaction.message.edit({ embeds: [newEmbed] });
                 }
             } catch (e) { /* ignore */ }
 
-            await interaction.reply({ content: `🎉 You entered the giveaway! (${ga.entrants.length} entries)`, ephemeral: true });
+            await interaction.reply({ content: `ðŸŽ‰ You entered the giveaway! (${ga.entrants.length} entries)`, ephemeral: true });
             return;
         }
 
         // Vouch button in order ticket -> opens vouch modal
-        if (interaction.customId.startsWith('vouch_')) {
-            const parts = interaction.customId.split('_'); // vouch_{orderId}_{buyerId}
-            const orderId = parts[1];
-            const buyerId = parts[2];
+        // FIX: Use colon separator to avoid parsing ambiguity
+        // CustomId format: vouch:{orderId}:{buyerId}
+        if (interaction.customId.startsWith('vouch:')) {
+            const parts = interaction.customId.split(':'); // vouch:order_5:1234567890
+            const orderId = parts[1]; // e.g. "order_5"
+            const buyerId = parts[2]; // actual Discord user ID
 
             // Only allow the buyer of this order to vouch
             if (interaction.user.id !== buyerId) {
-                return interaction.reply({ content: '❌ Only the buyer of this order can vouch!', ephemeral: true });
+                return interaction.reply({ content: 'âŒ Only the buyer of this order can vouch!', ephemeral: true });
             }
 
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.reply({ content: '❌ Order not found!', ephemeral: true });
+            if (!order) return interaction.reply({ content: 'âŒ Order not found!', ephemeral: true });
 
             // Only allow vouch if staff has completed the order
             if (!order.completedBy) {
-                return interaction.reply({ content: '❌ Order must be confirmed by staff before you can vouch! Wait for staff to complete your order.', ephemeral: true });
+                return interaction.reply({ content: 'âŒ Order must be confirmed by staff before you can vouch! Wait for staff to complete your order.', ephemeral: true });
             }
 
             const modal = new ModalBuilder()
-                .setCustomId(`vouch_modal_${orderId}`)
-                .setTitle('⭐ Leave a Vouch');
+                .setCustomId(`vouch_modal:${orderId}`)
+                .setTitle('â­ Leave a Vouch');
 
             const ratingInput = new TextInputBuilder()
                 .setCustomId('vouch_rating')
@@ -1429,11 +1541,11 @@ Click **⭐ Vouch Now** to leave a vouch.`)
     // Modal submit (order)
     if (interaction.isModalSubmit()) {
         // Vouch modal submit -> posts to #vouches AND #orders
-        if (interaction.customId.startsWith('vouch_modal_')) {
-            const orderId = interaction.customId.replace('vouch_modal_', '');
+        if (interaction.customId.startsWith('vouch_modal:')) {
+            const orderId = interaction.customId.replace('vouch_modal:', '');
             const orders = loadData('orders.json');
             const order = orders[orderId];
-            if (!order) return interaction.reply({ content: '❌ Order not found!', ephemeral: true });
+            if (!order) return interaction.reply({ content: 'âŒ Order not found!', ephemeral: true });
 
             const rating = interaction.fields.getTextInputValue('vouch_rating');
             const review = interaction.fields.getTextInputValue('vouch_review');
@@ -1459,24 +1571,24 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             if (interaction.guild) await assignVerifiedBuyer(interaction.guild, interaction.user.id);
 
             // Mark order complete
-            order.status = '✅ Completed (Vouched)';
+            order.status = 'âœ… Completed (Vouched)';
             order.vouched = true;
             order.vouchReview = review;
             order.vouchRating = rating;
             order.completedAt = new Date().toISOString();
             saveData('orders.json', orders);
 
-            const stars = '⭐'.repeat(Math.min(parseInt(rating) || 5, 5));
+            const stars = 'â­'.repeat(Math.min(parseInt(rating) || 5, 5));
 
             // 1) Post vouch in #vouches
             const vouchEmbed = new EmbedBuilder()
-                .setTitle('✨⭐🎉 New Vouch!')
+                .setTitle('âœ¨â­ðŸŽ‰ New Vouch!')
                 .setDescription(`**${interaction.user.tag}** vouched for **${sellerTag}**`)
                 .addFields(
-                    { name: '🛒 Product', value: order.product, inline: true },
-                    { name: '🧾 Order', value: `#${order.orderNo}`, inline: true },
+                    { name: 'ðŸ›’ Product', value: order.product, inline: true },
+                    { name: 'ðŸ§¾ Order', value: `#${order.orderNo}`, inline: true },
                     { name: 'Rating', value: `${stars} (${rating}/5)` },
-                    { name: '📝 Review', value: review },
+                    { name: 'ðŸ“ Review', value: review },
                     { name: 'Total Vouches', value: `${vouches[sellerId].count}` }
                 )
                 .setColor('#FFD700')
@@ -1492,20 +1604,20 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             const ordersChannel = interaction.guild.channels.cache.find(c => c.name === 'orders');
             if (ordersChannel) {
                 const completeEmbed = new EmbedBuilder()
-                    .setTitle('✨⭐✅ Order Completed')
+                    .setTitle('âœ¨â­âœ… Order Completed')
                     .setDescription(`**Order No:** ${order.orderNo}\n**Product:** ${order.product}\n**Quantity:** ${order.quantity}\n**Buyer:** <@${interaction.user.id}>`)
                     .addFields(
-                        { name: '⭐ Vouch', value: `${stars} · ${review}` },
-                        { name: '🕒 Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>` }
+                        { name: 'â­ Vouch', value: `${stars} Â· ${review}` },
+                        { name: 'ðŸ•’ Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>` }
                     )
                     .setColor('#00C853')
                     .setFooter({ text: STORE_NAME })
                     .setTimestamp();
                 const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-                await orderMsg.react('/u2705').catch(() => {});
+                await orderMsg.react('✅').catch(() => {});
             }
 
-            await interaction.reply({ content: `✅ Vouch submitted! Posted in #vouches and logged in #orders.`, ephemeral: true });
+            await interaction.reply({ content: `âœ… Vouch submitted! Posted in #vouches and logged in #orders.`, ephemeral: true });
             return;
         }
 
@@ -1526,21 +1638,43 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             const embed = new EmbedBuilder()
                 .setDescription(desc)
                 .setColor('#00C853')
-                .setFooter({ text: `${STORE_NAME} · ${channelName}` })
+                .setFooter({ text: `${STORE_NAME} Â· ${channelName}` })
                 .setTimestamp();
 
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`buy_${id}`).setLabel('Order Now').setStyle(ButtonStyle.Success).setEmoji('🛒')
+                new ButtonBuilder().setCustomId(`buy_${id}`).setLabel('Order Now').setStyle(ButtonStyle.Success).setEmoji('ðŸ›’')
             );
 
             const shopChannel = interaction.guild.channels.cache.find(c => c.name === channelName) ||
                 interaction.guild.channels.cache.find(c => c.name === 'restock');
             if (shopChannel) {
                 await shopChannel.send({ embeds: [embed], components: [row] });
-                await interaction.reply({ content: `✅ Posted in #${shopChannel.name}!`, ephemeral: true });
+                await interaction.reply({ content: `âœ… Posted in #${shopChannel.name}!`, ephemeral: true });
             } else {
-                await interaction.reply({ content: '❌ Could not find shop channel.', ephemeral: true });
+                await interaction.reply({ content: 'âŒ Could not find shop channel.', ephemeral: true });
             }
+            return;
+        }
+
+        // Announcement modal submit
+        if (interaction.customId === 'announcement_modal') {
+            const title = interaction.fields.getTextInputValue('ann_title');
+            const body = interaction.fields.getTextInputValue('ann_body');
+            const colorHex = interaction.fields.getTextInputValue('ann_color') || 'FF5555';
+            const pingChoice = (interaction.fields.getTextInputValue('ann_ping') || 'none').toLowerCase();
+            let pingText = '';
+            if (pingChoice === 'everyone') pingText = '@everyone ';
+            else if (pingChoice === 'here') pingText = '@here ';
+            const embed = new EmbedBuilder()
+                .setTitle('📢 ' + title)
+                .setDescription(body)
+                .setColor('#' + colorHex.replace('#', ''))
+                .setFooter({ text: STORE_NAME + ' · Announcement' })
+                .setTimestamp();
+            const targetChannel = interaction.guild.channels.cache.find(c => c.name === 'announce');
+            if (!targetChannel) return interaction.reply({ content: '❌ Could not find #announce channel!', ephemeral: true });
+            await targetChannel.send({ content: pingText, embeds: [embed] });
+            await interaction.reply({ content: '✅ Announcement sent to ' + targetChannel + '!', ephemeral: true });
             return;
         }
 
@@ -1550,9 +1684,8 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             const price = interaction.fields.getTextInputValue('order_price') || 'TBD';
             const notes = interaction.fields.getTextInputValue('order_notes') || 'None';
 
-            orderCounter++;
-            saveData('counter.json', { orderCounter });
-            const orderNo = orderCounter;
+            // FIX: Use getNextOrderNo() for consistent counter
+            const orderNo = getNextOrderNo();
 
             const orders = loadData('orders.json');
             const orderId = `order_${orderNo}`;
@@ -1563,7 +1696,7 @@ Click **⭐ Vouch Now** to leave a vouch.`)
                 price,
                 notes,
                 buyer: interaction.user.id,
-                status: '⏳ Pending',
+                status: 'â³ Pending',
                 createdAt: new Date().toISOString()
             };
             saveData('orders.json', orders);
@@ -1579,21 +1712,21 @@ Click **⭐ Vouch Now** to leave a vouch.`)
             });
 
             const embed = new EmbedBuilder()
-                .setTitle(`🧾 Order No: ${orderNo}`)
+                .setTitle(`ðŸ§¾ Order No: ${orderNo}`)
                 .setDescription(`**Product:** ${product}\n**Quantity:** ${qty}\n**Offer:** ${price}\n**Notes:** ${notes}\n**Buyer:** <@${interaction.user.id}>\n\nA staff member will confirm your order shortly.`)
                 .setColor('#FF8800')
                 .setFooter({ text: STORE_NAME })
                 .setTimestamp();
 
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('💳 Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji('💳'),
-                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('✅ Confirm & Complete').setStyle(ButtonStyle.Success),
-                new ButtonBuilder().setCustomId('close_ticket').setLabel('🔒 Close').setStyle(ButtonStyle.Danger)
+                new ButtonBuilder().setCustomId(`send_upi_${orderId}`).setLabel('ðŸ’³ Send Payment QR').setStyle(ButtonStyle.Primary).setEmoji('ðŸ’³'),
+                new ButtonBuilder().setCustomId(`complete_${orderId}`).setLabel('âœ… Confirm & Complete').setStyle(ButtonStyle.Success),
+                new ButtonBuilder().setCustomId('close_ticket').setLabel('ðŸ”’ Close').setStyle(ButtonStyle.Danger)
             );
 
             await ticketChannel.send({ content: `<@${interaction.user.id}>
 <@${config.ownerId}>`, embeds: [embed], components: [row] });
-            await interaction.reply({ content: `✅ Order #${orderNo} placed! Staff will review shortly.`, ephemeral: true });
+            await interaction.reply({ content: `âœ… Order #${orderNo} placed! Staff will review shortly.`, ephemeral: true });
         }
     }
 });
@@ -1624,6 +1757,7 @@ client.on('messageCreate', async (message) => {
         if (snowflake) sellerId = snowflake[1];
     }
     if (!sellerId) sellerId = config.ownerId; // fallback to store owner
+    if (!sellerId) return; // no valid seller found, skip
 
     // 2) Parse the product - text after "bought/purchased"
     let product = 'Unknown Product';
@@ -1655,9 +1789,8 @@ client.on('messageCreate', async (message) => {
     }
 
     // 4) Generate order number
-    orderCounter++;
-    saveData('counter.json', { orderCounter });
-    const orderNo = orderCounter;
+    // FIX: Use getNextOrderNo()
+    const orderNo = getNextOrderNo();
 
     // 5) Save the order as completed
     const orders = loadData('orders.json');
@@ -1668,7 +1801,7 @@ client.on('messageCreate', async (message) => {
         price: price || 'N/A',
         buyer: message.author.id,
         seller: sellerId,
-        status: '✅ Completed',
+        status: 'âœ… Completed',
         source: 'vouch-message',
         vouched: true,
         vouchText: text,
@@ -1697,29 +1830,29 @@ client.on('messageCreate', async (message) => {
         const sellerTag = message.guild.members.cache.get(sellerId)?.user?.tag || (sellerId === config.ownerId ? STORE_NAME : 'Seller');
         const vouchText = text.length > 150 ? text.slice(0, 147) + '...' : text;
         const completeEmbed = new EmbedBuilder()
-            .setTitle(`✨ ORDER #${orderNo}`)
+            .setTitle(`âœ¨ ORDER #${orderNo}`)
             .setDescription(`**Item:** ${product}\n**Price:** ${price || 'N/A'}\n**Buyer:** <@${message.author.id}>\n**Seller:** ${sellerTag}`)
             .addFields(
-                { name: '⭐ Vouch', value: '> ' + vouchText },
-                { name: '🕒 Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
+                { name: 'â­ Vouch', value: '> ' + vouchText },
+                { name: 'ðŸ•’ Completed', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
             )
             .setColor('#00C853')
-            .setFooter({ text: `${STORE_NAME} · Confirmed Order` })
+            .setFooter({ text: `${STORE_NAME} Â· Confirmed Order` })
             .setTimestamp();
         const orderMsg = await ordersChannel.send({ embeds: [completeEmbed] });
-        await orderMsg.react('/u2705').catch(() => {});
+        await orderMsg.react('✅').catch(() => {});
     }
 
     // 8) Confirm to the buyer + add a vouch reaction embed
     const vouchEmbed = new EmbedBuilder()
-        .setTitle('✨⭐🎉 Vouch Logged')
+        .setTitle('âœ¨â­ðŸŽ‰ Vouch Logged')
         .setDescription(`Vouch submitted for **${product}** - **${price || 'N/A'}**`)
         .addFields(
-            { name: '🧾 Order No', value: `#${orderNo}`, inline: true },
-            { name: '👤 Buyer', value: `<@${message.author.id}>`, inline: true }
+            { name: 'ðŸ§¾ Order No', value: `#${orderNo}`, inline: true },
+            { name: 'ðŸ‘¤ Buyer', value: `<@${message.author.id}>`, inline: true }
         )
         .setColor('#FFD700')
-        .setFooter({ text: `${STORE_NAME} · Vouch #${vouches[sellerId].count}` });
+        .setFooter({ text: `${STORE_NAME} Â· Vouch #${vouches[sellerId].count}` });
     await message.channel.send({ embeds: [vouchEmbed] });
 });
 
@@ -1740,24 +1873,8 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // If DM was a vouch-style message from a buyer, log it like in #vouches
-    const vouchKeywords = /(?:legit|rep|bought|vouch|purchased|trusted|positive)/i;
-    if (vouchKeywords.test(text)) {
-        // Load vouches for the store owner as seller
-        const sellerId = config.ownerId;
-        const vouches = loadData('vouches.json');
-        if (!vouches[sellerId]) vouches[sellerId] = { count: 0, reviews: [] };
-        vouches[sellerId].count++;
-        vouches[sellerId].reviews.push({
-            from: message.author.id,
-            fromTag: message.author.tag,
-            product: 'DM vouch',
-            review: message.content,
-            date: new Date().toISOString()
-        });
-        saveData('vouches.json', vouches);
-        await message.channel.send('⭐ Vouch recorded! Thanks for trusting ' + STORE_NAME + '!');
-    }
+    // FIX: Remove DM vouch auto-detection - too many false positives
+    // "I bought coffee today" would be logged as a vouch for the store owner
 });
 
 // ==================== LEVELING + ANTI-SCAM ====================
@@ -1769,13 +1886,13 @@ client.on('messageCreate', async (message) => {
     if (await antiScamCheck(message)) {
         try {
             await message.delete();
-            const warn = await message.channel.send(`⚠️ <@${message.author.id}> that message looked like a scam link and was deleted. If this is a mistake, message staff!`);
+            const warn = await message.channel.send(`âš ï¸ <@${message.author.id}> that message looked like a scam link and was deleted. If this is a mistake, message staff!`);
             setTimeout(() => warn.delete().catch(() => {}), 8000);
             // Log to ticket-logs
             const logChannel = message.guild.channels.cache.find(c => c.name === 'ticket-logs');
             if (logChannel) {
                 const logEmbed = new EmbedBuilder()
-                    .setTitle('🛡️ Scam Attempt Blocked')
+                    .setTitle('ðŸ›¡ï¸ Scam Attempt Blocked')
                     .setDescription(`**User:** <@${message.author.id}>\n**Channel:** <#${message.channel.id}>\n**Message:** ` + '`' + message.content.slice(0, 300) + '`')
                     .setColor('#FF0000')
                     .setTimestamp();
@@ -1796,13 +1913,13 @@ client.on('guildMemberAdd', async (member) => {
     if (!welcomeChannel) return;
 
     const embed = new EmbedBuilder()
-        .setTitle(`👋 Welcome, ${member.user.username}!`)
+        .setTitle(`ðŸ‘‹ Welcome, ${member.user.username}!`)
         .setDescription(`Welcome to ${STORE_NAME}!\n\n` +
-            `**🛒** Check our shops for the latest stock\n` +
-            `**✅** Trusted by 100+ customers - check our vouches in <#${member.guild.channels.cache.find(c => c.name === 'vouches')?.id || 'vouches'}>\n` +
-            `**🧾** Every order confirmed in <#${member.guild.channels.cache.find(c => c.name === 'orders')?.id || 'orders'}>\n` +
-            `**💬** Chat with us in <#${member.guild.channels.cache.find(c => c.name === 'general-chat')?.id || 'general-chat'}>\n` +
-            `**🎫** Want to buy? Create an order!\n\n` +
+            `**ðŸ›’** Check our shops for the latest stock\n` +
+            `**âœ…** Trusted by 100+ customers - check our vouches in <#${member.guild.channels.cache.find(c => c.name === 'vouches')?.id || 'vouches'}>\n` +
+            `**ðŸ§¾** Every order confirmed in <#${member.guild.channels.cache.find(c => c.name === 'orders')?.id || 'orders'}>\n` +
+            `**ðŸ’¬** Chat with us in <#${member.guild.channels.cache.find(c => c.name === 'general-chat')?.id || 'general-chat'}>\n` +
+            `**ðŸŽ«** Want to buy? Create an order!\n\n` +
             `Read the rules in <#${member.guild.channels.cache.find(c => c.name === 'rules')?.id || 'rules'}>!`)
         .setThumbnail(member.user.displayAvatarURL())
         .setImage('https://media.tenor.com/EWwYmIsWKroAAAAM/kaneki-tokyo-ghoul.gif')
@@ -1810,7 +1927,7 @@ client.on('guildMemberAdd', async (member) => {
         .setFooter({ text: STORE_NAME })
         .setTimestamp();
 
-    await welcomeChannel.send({ content: `Welcome <@${member.user.id}>! 🎉`, embeds: [embed] });
+    await welcomeChannel.send({ content: `Welcome <@${member.user.id}>! ðŸŽ‰`, embeds: [embed] });
 
     // Auto-assign Member role
     const memberRole = member.guild.roles.cache.find(r => r.name === 'Member');
@@ -1823,7 +1940,7 @@ if (process.env.TOKEN || process.env.DISCORD_TOKEN) {
     console.log('Using token from environment variable.');
 }
 if (!config.token || config.token === 'YOUR_BOT_TOKEN_HERE') {
-    console.error('❌ Please set your bot token in config.json (or TOKEN env var)!');
+    console.error('âŒ Please set your bot token in config.json (or TOKEN env var)!');
     process.exit(1);
 }
 client.login(config.token);
