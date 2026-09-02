@@ -406,40 +406,40 @@ const commands = [
     new SlashCommandBuilder()
         .setName('lock')
         .setDescription('Lock channel')
-        .addChannelOption(o => o.setName('channel').setDescription('Channel').required(false)),
+        .addChannelOption(o => o.setName('channel').setDescription('Channel').setRequired(false)),
     new SlashCommandBuilder()
         .setName('unlock')
         .setDescription('Unlock channel')
-        .addChannelOption(o => o.setName('channel').setDescription('Channel').required(false)),
+        .addChannelOption(o => o.setName('channel').setDescription('Channel').setRequired(false)),
     new SlashCommandBuilder()
         .setName('slowmode')
         .setDescription('Set slowmode')
-        .addIntegerOption(o => o.setName('seconds').setDescription('Delay (0 to disable)').required(true))
-        .addChannelOption(o => o.setName('channel').setDescription('Channel').required(false)),
+        .addIntegerOption(o => o.setName('seconds').setDescription('Delay (0 to disable)').setRequired(true))
+        .addChannelOption(o => o.setName('channel').setDescription('Channel').setRequired(false)),
     new SlashCommandBuilder()
         .setName('kick')
         .setDescription('Kick member')
-        .addUserOption(o => o.setName('user').setDescription('User').required(true))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').required(false)),
+        .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
     new SlashCommandBuilder()
         .setName('ban')
         .setDescription('Ban member')
-        .addUserOption(o => o.setName('user').setDescription('User').required(true))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').required(false)),
+        .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
     new SlashCommandBuilder()
         .setName('mute')
         .setDescription('Timeout member')
-        .addUserOption(o => o.setName('user').setDescription('User').required(true))
-        .addIntegerOption(o => o.setName('minutes').setDescription('Duration').required(false))
-        .addStringOption(o => o.setName('reason').setDescription('Reason').required(false)),
+        .addUserOption(o => o.setName('user').setDescription('User').setRequired(true))
+        .addIntegerOption(o => o.setName('minutes').setDescription('Duration').setRequired(false))
+        .addStringOption(o => o.setName('reason').setDescription('Reason').setRequired(false)),
     new SlashCommandBuilder()
         .setName('unmute')
         .setDescription('Remove timeout')
-        .addUserOption(o => o.setName('user').setDescription('User').required(true)),
+        .addUserOption(o => o.setName('user').setDescription('User').setRequired(true)),
     new SlashCommandBuilder()
         .setName('purge')
         .setDescription('Bulk delete')
-        .addIntegerOption(o => o.setName('count').setDescription('Count (max 100)').required(true))
+        .addIntegerOption(o => o.setName('count').setDescription('Count (max 100)').setRequired(true))
 ];
 
 async function registerCommands(guild) {
