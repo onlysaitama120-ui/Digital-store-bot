@@ -662,7 +662,7 @@ client.on('interactionCreate', async (interaction) => {
                 list.forEach(([id, p]) => {
                     embed.addFields({ 
                         name: `${p.name || 'Product'} - ${p.price || ''}`, 
-                        value: `${p.description || '').slice(0, 100)}/nSeller: <@${p.seller}>`, 
+                        value: `${(p.description || '').slice(0, 100)}/nSeller: <@${p.seller}>`, 
                         inline: false 
                     });
                 });
@@ -1191,7 +1191,7 @@ client.on('interactionCreate', async (interaction) => {
                 const embed = interaction.message.embeds[0];
                 if (embed) {
                     let desc = embed.description || '';
-                    desc = desc.replace(/.*/*/*Entries:/*/*/s*/d+/g, '');
+                    desc = desc.replace(/.*Entries:.*d+/g, '');
                     desc += '/n/n**Entries:** ' + ga.entrants.length;
                     const newEmbed = EmbedBuilder.from(embed).setDescription(desc);
                     await interaction.message.edit({ embeds: [newEmbed] });
@@ -1658,7 +1658,6 @@ if (!config.token || config.token === 'YOUR_BOT_TOKEN_HERE') {
 }
 
 // Health server MUST start first to keep Render alive
-const http = require('http');
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
