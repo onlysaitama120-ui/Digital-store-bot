@@ -377,7 +377,7 @@ const commands = [
     new SlashCommandBuilder()
         .setName('confirm')
         .setDescription('Confirm order (Staff)')
-        .addIntegerOption(o => o.setName('orderno').setDescription('Order number').required(true)),
+        .addIntegerOption(o => o.setName('orderno').setDescription('Order number').setRequired(true)),
     new SlashCommandBuilder()
         .setName('help')
         .setDescription('Show all commands'),
@@ -387,7 +387,7 @@ const commands = [
     new SlashCommandBuilder()
         .setName('upi')
         .setDescription('Show UPI scanner')
-        .addIntegerOption(o => o.setName('amount').setDescription('Amount in ₹').required(true)),
+        .addIntegerOption(o => o.setName('amount').setDescription('Amount in ₹').setRequired(true)),
     new SlashCommandBuilder()
         .setName('announcement')
         .setDescription('Send announcement (Staff only)')
@@ -395,14 +395,14 @@ const commands = [
     new SlashCommandBuilder()
         .setName('giveaway')
         .setDescription('Start giveaway (Staff only)')
-        .addStringOption(o => o.setName('prize').setDescription('Prize').required(true))
-        .addIntegerOption(o => o.setName('hours').setDescription('Duration in hours').required(true))
-        .addIntegerOption(o => o.setName('winners').setDescription('Number of winners').required(false)),
+        .addStringOption(o => o.setName('prize').setDescription('Prize').setRequired(true))
+        .addIntegerOption(o => o.setName('hours').setDescription('Duration in hours').setRequired(true))
+        .addIntegerOption(o => o.setName('winners').setDescription('Number of winners').setRequired(false)),
     new SlashCommandBuilder()
         .setName('setupi')
         .setDescription('Set UPI ID (Staff only)')
-        .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID').required(true))
-        .addStringOption(o => o.setName('name').setDescription('Payee name').required(false)),
+        .addStringOption(o => o.setName('upiid').setDescription('Your UPI ID').setRequired(true))
+        .addStringOption(o => o.setName('name').setDescription('Payee name').setRequired(false)),
     new SlashCommandBuilder()
         .setName('lock')
         .setDescription('Lock channel')
